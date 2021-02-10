@@ -8,6 +8,7 @@ require (
 	github.com/Azure/go-autorest/autorest/adal v0.9.11
 	github.com/Azure/go-autorest/autorest/to v0.4.0 // indirect
 	github.com/Azure/go-autorest/autorest/validation v0.3.1 // indirect
+	github.com/aws/aws-sdk-go v1.37.8
 	github.com/openshift/api v0.0.0-20210423140644-156ca80f8d83
 	github.com/openshift/client-go v0.0.0-20210503124028-ac0910aac9fa
 	k8s.io/api v0.21.0-rc.0
