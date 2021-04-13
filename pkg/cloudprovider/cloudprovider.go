@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -15,7 +15,12 @@ var (
 	NoNetworkInterfaceError     = errors.New("no retrievable network interface")
 	AlreadyExistingIPError      = errors.New("the requested IP for assignment is already assigned")
 	NonExistingIPError          = errors.New("the requested IP for removal is not assigned")
+	UnexpectedURIErrorString    = "the URI is not expected"
 )
+
+func UnexpectedURIError(uri string) error {
+	return errors.New(fmt.Sprintf("%s: %s", UnexpectedURIErrorString, uri))
+}
 
 type CloudProviderIntf interface {
 	// initCredentials initializes the cloud API credentials by reading the
@@ -116,4 +121,12 @@ func NewCloudProviderClient(platformType string) (CloudProviderIntf, error) {
 		return nil, fmt.Errorf("unsupported cloud provider platform type: %s", platformType)
 	}
 	return cloudProviderIntf, cloudProviderIntf.initCredentials()
+}
+
+func (c *CloudProvider) readSecretData(secret string) (string, error) {
+	data, err := ioutil.ReadFile(cloudProviderSecretLocation + secret)
+	if err != nil {
+		return "", fmt.Errorf("unable to read secret data, err: %v", err)
+	}
+	return string(data), nil
 }

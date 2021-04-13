@@ -91,6 +91,7 @@ func (t *CloudPrivateIPConfigTestCase) NewFakeCloudPrivateIPConfigController() *
 	cloudNetworkInformerFactory := cloudnetworkinformers.NewSharedInformerFactory(fakeCloudNetworkClient, 0)
 
 	cloudPrivateIPConfigController := NewCloudPrivateIPConfigController(
+		context.TODO(),
 		fakeCloudProvider,
 		fakeCloudNetworkClient,
 		cloudNetworkInformerFactory.Cloud().V1().CloudPrivateIPConfigs(),
