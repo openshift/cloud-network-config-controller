@@ -11,6 +11,8 @@ require (
 	github.com/aws/aws-sdk-go v1.37.8
 	github.com/openshift/api v0.0.0-20210423140644-156ca80f8d83
 	github.com/openshift/client-go v0.0.0-20210503124028-ac0910aac9fa
+	golang.org/x/sys v0.0.0-20210412220455-f1c623a9e750 // indirect
+	google.golang.org/api v0.44.0
 	k8s.io/api v0.21.0-rc.0
 	k8s.io/apimachinery v0.21.0
 	k8s.io/client-go v0.21.0-rc.0
