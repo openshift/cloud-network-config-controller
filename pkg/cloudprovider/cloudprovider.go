@@ -87,7 +87,7 @@ type NodeEgressIPConfiguration struct {
 	Capacity  capacity `json:"capacity"`
 }
 
-func NewCloudProviderClient(platformType string) (CloudProviderIntf, error) {
+func NewCloudProviderClient(platformType, platformRegion string) (CloudProviderIntf, error) {
 	var cloudProviderIntf CloudProviderIntf
 
 	// Initialize a separate context from the main context, rationale: cloud
@@ -110,6 +110,7 @@ func NewCloudProviderClient(platformType string) (CloudProviderIntf, error) {
 			CloudProvider: CloudProvider{
 				ctx: cloudProviderCtx,
 			},
+			region: platformRegion,
 		}
 	case gcp:
 		cloudProviderIntf = &GCP{
