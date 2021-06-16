@@ -1,10 +1,10 @@
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.16-openshift-4.8 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.16-openshift-4.9 AS builder
 
 WORKDIR /go/src/github.com/openshift/cloud-network-config-controller
 COPY . .
 RUN make build
 
-FROM registry.ci.openshift.org/ocp/4.8:base
+FROM registry.ci.openshift.org/ocp/4.9:base
 
 COPY --from=builder /go/src/github.com/openshift/cloud-network-config-controller/_output/bin/cloud-network-config-controller /usr/bin/
 
