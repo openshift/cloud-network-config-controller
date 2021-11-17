@@ -34,6 +34,7 @@ var (
 	kubeConfig          string
 	platformType        string
 	platformRegion      string
+	secretOverride      string
 	secretName          string
 	controllerName      string
 	controllerNamespace string
@@ -92,7 +93,7 @@ func main() {
 					klog.Exitf("Error building cloudnetwork clientset: %s", err.Error())
 				}
 
-				cloudProviderClient, err := cloudprovider.NewCloudProviderClient(platformType, platformRegion)
+				cloudProviderClient, err := cloudprovider.NewCloudProviderClient(platformType, platformRegion, secretOverride)
 				if err != nil {
 					klog.Fatal("Error building cloud provider client, err: %v", err)
 				}
@@ -172,6 +173,7 @@ func init() {
 	flag.StringVar(&secretName, "secret-name", "", "The cloud provider secret name - used for talking to the cloud API.")
 	flag.StringVar(&platformType, "platform-type", "", "The cloud provider platform type this component is running on.")
 	flag.StringVar(&platformRegion, "platform-region", "", "The cloud provider platform region the cluster is deployed in, if required by the cloud provider")
+	flag.StringVar(&secretOverride, "secret-override", "", "The cloud provider secret location override, useful when running this component locally against a cluster")
 	flag.StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 	flag.Parse()
 

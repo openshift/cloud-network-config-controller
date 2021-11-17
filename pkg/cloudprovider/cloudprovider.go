@@ -87,7 +87,7 @@ type NodeEgressIPConfiguration struct {
 	Capacity  capacity `json:"capacity"`
 }
 
-func NewCloudProviderClient(platformType, platformRegion string) (CloudProviderIntf, error) {
+func NewCloudProviderClient(platformType, platformRegion, secretOverride string) (CloudProviderIntf, error) {
 	var cloudProviderIntf CloudProviderIntf
 
 	// Initialize a separate context from the main context, rationale: cloud
@@ -120,6 +120,9 @@ func NewCloudProviderClient(platformType, platformRegion string) (CloudProviderI
 		}
 	default:
 		return nil, fmt.Errorf("unsupported cloud provider platform type: %s", platformType)
+	}
+	if secretOverride != "" {
+		cloudProviderSecretLocation = secretOverride
 	}
 	return cloudProviderIntf, cloudProviderIntf.initCredentials()
 }
