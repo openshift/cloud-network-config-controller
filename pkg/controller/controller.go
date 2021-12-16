@@ -82,7 +82,7 @@ func NewCloudNetworkConfigController(
 // workers to finish processing their current work items.
 func (c *CloudNetworkConfigController) Run(stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
-	defer c.workqueue.ShutDown()
+	defer c.workqueue.ShutDownWithDrain()
 
 	// Start the informer factories to begin populating the informer caches
 	klog.Infof("Starting %s controller", c.controllerKey)

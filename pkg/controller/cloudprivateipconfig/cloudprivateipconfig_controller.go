@@ -394,7 +394,7 @@ func (c *CloudPrivateIPConfigController) getCloudPrivateIPConfig(name string) (*
 	ctx, cancel := context.WithTimeout(c.ctx, controller.ClientTimeout)
 	defer cancel()
 	// This object will repeatedly be updated during this sync, hence we need to
-	// retrieve the object from the API server as supposed to the informer cache
+	// retrieve the object from the API server as opposed to the informer cache
 	// for every sync, otherwise we risk acting on an old object
 	cloudPrivateIPConfig, err := c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Get(ctx, name, metav1.GetOptions{})
 	if err != nil {

@@ -65,8 +65,8 @@ func NewFakeRacyCloudPrivateIPConfigController(delayCompletion time.Duration) *F
 }
 
 func TestDelayedCompletionWithCoalescedUpdatesBeforeFirstCreateOperationFinishes(t *testing.T) {
-	// The following test executes the scenario below (brackets indicate expect
-	// time to execute, paranthesis: parallel event):
+	// The following test executes the scenario below (brackets indicate
+	// expected time to execute, parenthesis: parallel event):
 	// time: 0
 	// +NodeA [100ms]
 	// (Update to NodeB - 50ms in)
@@ -157,8 +157,8 @@ func TestDelayedCompletionWithCoalescedUpdatesBeforeFirstCreateOperationFinishes
 }
 
 func TestDelayedCompletionWithCoalescedUpdatesAfterFirstCreateOperationFinishes(t *testing.T) {
-	// The following test executes the scenario below (brackets indicate expect
-	// time to execute, paranthesis: parallel event):
+	// The following test executes the scenario below (brackets indicate
+	// expected time to execute, parenthesis: parallel event):
 	// time: 0
 	// +NodeA [100ms]
 	// (Update to NodeB - 200ms in)
@@ -167,7 +167,7 @@ func TestDelayedCompletionWithCoalescedUpdatesAfterFirstCreateOperationFinishes(
 	// +NodeC 100ms
 	// Small explainer: the above case is correct because it takes the sync
 	// 100ms to remove the assignment to NodeA, during which the update to NodeC
-	// comes in. The update from NodeB -> NodeC thus gets override and we don't
+	// comes in. The update from NodeB -> NodeC thus gets overridden and we don't
 	// perform an additional unnecessary operation to NodeB
 	testObject := &cloudnetworkv1.CloudPrivateIPConfig{
 		ObjectMeta: v1.ObjectMeta{
@@ -251,8 +251,8 @@ func TestDelayedCompletionWithCoalescedUpdatesAfterFirstCreateOperationFinishes(
 }
 
 func TestDelayedCompletionWithCoalescedUpdatesAfterFirstCreateOperationFinishesAgain(t *testing.T) {
-	// The following test executes the scenario below (brackets indicate expect
-	// time to execute, paranthesis: parallel event):
+	// The following test executes the scenario below (brackets indicate
+	// expected time to execute, parenthesis: parallel event):
 	// time: 0
 	// +NodeA [100ms]
 	// (Update to NodeB - 200ms in)
@@ -263,7 +263,7 @@ func TestDelayedCompletionWithCoalescedUpdatesAfterFirstCreateOperationFinishesA
 	// +NodeC 100ms
 	// Small explainer: the above case is correct because it takes the sync
 	// 100ms to remove the assignment to NodeA. Since the update to NodeC comes
-	// in at 110ms, the assign to NodeB has already started. Once that has
+	// in at 110ms, the assignment to NodeB has already started. Once that has
 	// happened it needs to finish assigning it and removing it before updating
 	// the assignment to NodeC. This case cannot go any other way and there is
 	// no better solution. perform an additional unnecessary operation to NodeB

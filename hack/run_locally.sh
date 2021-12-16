@@ -16,11 +16,11 @@ ROOT=$(readlink --canonicalize "$HERE/..")
 SECRET_LOCATION=$ROOT/tmp-secret-location/
 mkdir -p $SECRET_LOCATION
 
-cloudprovider=$(oc get infrastructures.config.openshift.io cluster  -o jsonpath='{.status.platform}')
+platformtype=$(oc get infrastructures.config.openshift.io cluster  -o jsonpath='{.status.platform}')
 
 # This won't work on platforms != AWS, but we don't care. 
 # The command won't fail and `cloudregion` is only used on AWS
-cloudregion=$(oc get infrastructures.config.openshift.io cluster  -o jsonpath='{.status.platformStatus.aws.region}')
+platformregion=$(oc get infrastructures.config.openshift.io cluster  -o jsonpath='{.status.platformStatus.aws.region}')
 
 json=$(oc get secret cloud-credentials -n openshift-cloud-network-config-controller -o jsonpath='{.data}')
 for key in $(echo $json | jq -r 'keys[]'); do
@@ -36,6 +36,6 @@ oc scale deployment cloud-network-config-controller -n openshift-cloud-network-c
 
 go run $ROOT/cmd/cloud-network-config-controller/main.go \
 	-kubeconfig $KUBECONFIG \
-	-cloud-provider $cloudprovider \
-	-cloud-secret-override $SECRET_LOCATION \
-	-cloud-region $cloudregion
+	-platform-type $platformtype \
+	-platform-region $platformregion \
+	-secret-override $SECRET_LOCATION
