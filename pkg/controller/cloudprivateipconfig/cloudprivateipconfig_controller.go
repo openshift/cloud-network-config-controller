@@ -161,6 +161,11 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 	if err != nil {
 		return err
 	}
+	// When syncing objects which have been completely deleted: we must make
+	// sure to not continue processing the object.
+	if cloudPrivateIPConfig == nil {
+		return nil
+	}
 
 	ip := cloudPrivateIPConfigNameToIP(cloudPrivateIPConfig.Name)
 
