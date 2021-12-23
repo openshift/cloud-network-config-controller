@@ -7,7 +7,6 @@ import (
 	"time"
 
 	awsapi "github.com/aws/aws-sdk-go/aws"
-	awscredentials "github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	ocpconfigv1 "github.com/openshift/api/config/v1"
@@ -29,16 +28,12 @@ type AWS struct {
 }
 
 func (a *AWS) initCredentials() error {
-	accessKey, err := a.readSecretData("aws_access_key_id")
-	if err != nil {
-		return err
+	sessionOpts := session.Options{
+		SharedConfigState: session.SharedConfigEnable,
+		SharedConfigFiles: []string{cloudProviderSecretLocation + "credentials"},
 	}
-	secretKey, err := a.readSecretData("aws_secret_access_key")
-	if err != nil {
-		return err
-	}
-	mySession := session.Must(session.NewSession())
-	a.client = ec2.New(mySession, awsapi.NewConfig().WithCredentials(awscredentials.NewStaticCredentials(accessKey, secretKey, "")).WithRegion(a.region))
+	mySession := session.Must(session.NewSessionWithOptions(sessionOpts))
+	a.client = ec2.New(mySession, awsapi.NewConfig().WithRegion(a.region))
 	return nil
 }
 
