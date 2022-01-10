@@ -32,9 +32,7 @@ const (
 
 var (
 	kubeConfig          string
-	platformType        string
-	platformRegion      string
-	secretOverride      string
+	platformCfg         cloudprovider.CloudProviderConfig
 	secretName          string
 	controllerName      string
 	controllerNamespace string
@@ -93,7 +91,7 @@ func main() {
 					klog.Exitf("Error building cloudnetwork clientset: %s", err.Error())
 				}
 
-				cloudProviderClient, err := cloudprovider.NewCloudProviderClient(platformType, platformRegion, secretOverride)
+				cloudProviderClient, err := cloudprovider.NewCloudProviderClient(platformCfg)
 				if err != nil {
 					klog.Fatal("Error building cloud provider client, err: %v", err)
 				}
@@ -171,15 +169,18 @@ func init() {
 
 	// These are arguments for this controller
 	flag.StringVar(&secretName, "secret-name", "", "The cloud provider secret name - used for talking to the cloud API.")
-	flag.StringVar(&platformType, "platform-type", "", "The cloud provider platform type this component is running on.")
-	flag.StringVar(&platformRegion, "platform-region", "", "The cloud provider platform region the cluster is deployed in, if required by the cloud provider")
-	flag.StringVar(&secretOverride, "secret-override", "", "The cloud provider secret location override, useful when running this component locally against a cluster")
+	flag.StringVar(&platformCfg.PlatformType, "platform-type", "", "The cloud provider platform type this component is running on.")
+	flag.StringVar(&platformCfg.Region, "platform-region", "", "The cloud provider platform region the cluster is deployed in, required for AWS")
+	flag.StringVar(&platformCfg.APIOverride, "platform-api-url", "", "The cloud provider API URL to use (instead of whatever default).")
+	flag.StringVar(&platformCfg.CredentialDir, "secret-override", "/etc/secret/cloudprovider", "The cloud provider secret location override, useful when running this component locally against a cluster")
+	flag.StringVar(&platformCfg.AzureEnvironment, "platform-azure-environment", "AzurePublicCloud", "The Azure environment name, used to select API endpoints")
+	flag.StringVar(&platformCfg.AWSCAOverride, "platform-aws-ca-override", "", "Path to a separate CA bundle to use when connecting to the AWS API")
 	flag.StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 	flag.Parse()
 
 	// Verify required arguments
-	if secretName == "" || platformType == "" {
-		klog.Exit("-secret-name or -cloud-provider is empty, cannot initialize controller")
+	if secretName == "" || platformCfg.PlatformType == "" {
+		klog.Exit("-secret-name or -platform-type is empty, cannot initialize controller")
 	}
 
 	// These are populated by the downward API

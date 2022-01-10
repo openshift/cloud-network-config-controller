@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"path/filepath"
 
 	corev1 "k8s.io/api/core/v1"
 )
 
 var (
-	cloudProviderSecretLocation = "/etc/secret/cloudprovider/"
-	NoNetworkInterfaceError     = errors.New("no retrievable network interface")
-	AlreadyExistingIPError      = errors.New("the requested IP for assignment is already assigned")
-	NonExistingIPError          = errors.New("the requested IP for removal is not assigned")
-	UnexpectedURIErrorString    = "the URI is not expected"
+	NoNetworkInterfaceError  = errors.New("no retrievable network interface")
+	AlreadyExistingIPError   = errors.New("the requested IP for assignment is already assigned")
+	NonExistingIPError       = errors.New("the requested IP for removal is not assigned")
+	UnexpectedURIErrorString = "the URI is not expected"
 )
+
+const UserAgent = "cloud-network-config-controller"
 
 func UnexpectedURIError(uri string) error {
 	return errors.New(fmt.Sprintf("%s: %s", UnexpectedURIErrorString, uri))
@@ -57,8 +59,22 @@ type CloudProviderIntf interface {
 	GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error)
 }
 
+// CloudProviderConfig is all the command-line options needed to initialize
+// a cloud provider client.
+type CloudProviderConfig struct {
+	PlatformType  string // one of AWS, Azure, GCP
+	APIOverride   string // override the API endpoint URL. Used by all platforms.
+	CredentialDir string // override the default credential directory
+
+	Region        string // region, only used by AWS
+	AWSCAOverride string
+
+	AzureEnvironment string // The azure "environment", which is a set of API endpoints
+}
+
 type CloudProvider struct {
 	CloudProviderIntf
+	cfg CloudProviderConfig
 	ctx context.Context
 }
 
@@ -87,7 +103,7 @@ type NodeEgressIPConfiguration struct {
 	Capacity  capacity `json:"capacity"`
 }
 
-func NewCloudProviderClient(platformType, platformRegion, secretOverride string) (CloudProviderIntf, error) {
+func NewCloudProviderClient(cfg CloudProviderConfig) (CloudProviderIntf, error) {
 	var cloudProviderIntf CloudProviderIntf
 
 	// Initialize a separate context from the main context, rationale: cloud
@@ -97,38 +113,32 @@ func NewCloudProviderClient(platformType, platformRegion, secretOverride string)
 	// update our store (the cloud provider) before terminating, thus we can't
 	// use the main context because it will be cancelled in such events.
 	cloudProviderCtx := context.Background()
+	cp := CloudProvider{
+		ctx: cloudProviderCtx,
+		cfg: cfg,
+	}
 
-	switch platformType {
-	case azure:
+	switch cfg.PlatformType {
+	case PlatformTypeAzure:
 		cloudProviderIntf = &Azure{
-			CloudProvider: CloudProvider{
-				ctx: cloudProviderCtx,
-			},
+			CloudProvider: cp,
 		}
-	case aws:
+	case PlatformTypeAWS:
 		cloudProviderIntf = &AWS{
-			CloudProvider: CloudProvider{
-				ctx: cloudProviderCtx,
-			},
-			region: platformRegion,
+			CloudProvider: cp,
 		}
-	case gcp:
+	case PlatformTypeGCP:
 		cloudProviderIntf = &GCP{
-			CloudProvider: CloudProvider{
-				ctx: cloudProviderCtx,
-			},
+			CloudProvider: cp,
 		}
 	default:
-		return nil, fmt.Errorf("unsupported cloud provider platform type: %s", platformType)
-	}
-	if secretOverride != "" {
-		cloudProviderSecretLocation = secretOverride
+		return nil, fmt.Errorf("unsupported cloud provider platform type: %s", cfg.PlatformType)
 	}
 	return cloudProviderIntf, cloudProviderIntf.initCredentials()
 }
 
 func (c *CloudProvider) readSecretData(secret string) (string, error) {
-	data, err := ioutil.ReadFile(cloudProviderSecretLocation + secret)
+	data, err := ioutil.ReadFile(filepath.Join(c.cfg.CredentialDir, secret))
 	if err != nil {
 		return "", fmt.Errorf("unable to read secret data, err: %v", err)
 	}
