@@ -139,7 +139,6 @@ github.com/modern-go/reflect2
 # github.com/openshift/api v0.0.0-20210423140644-156ca80f8d83
 ## explicit; go 1.15
 github.com/openshift/api/cloudnetwork/v1
-github.com/openshift/api/config/v1
 # github.com/openshift/client-go v0.0.0-20210503124028-ac0910aac9fa
 ## explicit; go 1.15
 github.com/openshift/client-go/cloudnetwork/clientset/versioned
