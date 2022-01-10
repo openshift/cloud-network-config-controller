@@ -83,9 +83,9 @@ func main() {
 			},
 		},
 		ReleaseOnCancel: true,
-		LeaseDuration:   15 * time.Second,
-		RenewDeadline:   10 * time.Second,
-		RetryPeriod:     2 * time.Second,
+		LeaseDuration:   137 * time.Second, // leader election values from https://github.com/openshift/library-go/pull/1104
+		RenewDeadline:   107 * time.Second,
+		RetryPeriod:     26 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				cloudNetworkClient, err := cloudnetworkclientset.NewForConfig(cfg)
