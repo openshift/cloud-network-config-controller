@@ -3,13 +3,14 @@ package cloudprovider
 import (
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	awsapi "github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	ocpconfigv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -17,23 +18,38 @@ import (
 )
 
 const (
-	aws = string(ocpconfigv1.AWSPlatformType)
+	PlatformTypeAWS = "AWS"
 )
 
 // AWS implements the API wrapper for talking to the AWS cloud API
 type AWS struct {
 	CloudProvider
-	region string
 	client *ec2.EC2
 }
 
 func (a *AWS) initCredentials() error {
 	sessionOpts := session.Options{
 		SharedConfigState: session.SharedConfigEnable,
-		SharedConfigFiles: []string{cloudProviderSecretLocation + "credentials"},
+		SharedConfigFiles: []string{filepath.Join(a.cfg.CredentialDir, "credentials")},
 	}
-	mySession := session.Must(session.NewSessionWithOptions(sessionOpts))
-	a.client = ec2.New(mySession, awsapi.NewConfig().WithRegion(a.region))
+	c := awsapi.NewConfig().WithRegion(a.cfg.Region)
+	if a.cfg.APIOverride != "" {
+		c = c.WithEndpoint(a.cfg.APIOverride)
+	}
+	if a.cfg.AWSCAOverride != "" {
+		var err error
+		sessionOpts.CustomCABundle, err = os.Open(a.cfg.AWSCAOverride)
+		if err != nil {
+			return fmt.Errorf("could not open AWS CA bundle %s: %w", a.cfg.AWSCAOverride, err)
+		}
+	}
+
+	mySession, err := session.NewSessionWithOptions(sessionOpts)
+	if err != nil {
+		return fmt.Errorf("could not initialize AWS session: %w", err)
+	}
+
+	a.client = ec2.New(mySession, c)
 	return nil
 }
 

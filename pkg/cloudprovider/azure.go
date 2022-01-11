@@ -11,14 +11,14 @@ import (
 	compute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-06-30/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
+	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
-	ocpconfigv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
 )
 
 const (
-	azure = string(ocpconfigv1.AzurePlatformType)
+	PlatformTypeAzure = "Azure"
 	// Azure defines a private IP assignment limit of 256 addresses per NIC and
 	// 65,536 per virtual network see:
 	// https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/azure-subscription-service-limits?toc=/azure/virtual-network/toc.json#networking-limits
@@ -32,6 +32,7 @@ const (
 type Azure struct {
 	CloudProvider
 	resourceGroup        string
+	env                  azure.Environment
 	vmClient             compute.VirtualMachinesClient
 	virtualNetworkClient network.VirtualNetworksClient
 	networkClient        network.InterfacesClient
@@ -63,17 +64,27 @@ func (a *Azure) initCredentials() error {
 		return err
 	}
 
-	a.vmClient = compute.NewVirtualMachinesClient(subscriptionID)
+	// Pick the Azure "Environment", which is just a named set of API endpoints.
+	if a.cfg.APIOverride != "" {
+		a.env, err = azure.EnvironmentFromURL(a.cfg.APIOverride)
+	} else {
+		a.env, err = azure.EnvironmentFromName(a.cfg.AzureEnvironment)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to initialize Azure environment: %w", err)
+	}
+
+	a.vmClient = compute.NewVirtualMachinesClientWithBaseURI(a.env.ResourceManagerEndpoint, subscriptionID)
 	a.vmClient.Authorizer = authorizer
-	a.vmClient.AddToUserAgent(azure)
+	_ = a.vmClient.AddToUserAgent(UserAgent)
 
-	a.networkClient = network.NewInterfacesClient(subscriptionID)
+	a.networkClient = network.NewInterfacesClientWithBaseURI(a.env.ResourceManagerEndpoint, subscriptionID)
 	a.networkClient.Authorizer = authorizer
-	a.networkClient.AddToUserAgent(azure)
+	_ = a.networkClient.AddToUserAgent(UserAgent)
 
-	a.virtualNetworkClient = network.NewVirtualNetworksClient(subscriptionID)
+	a.virtualNetworkClient = network.NewVirtualNetworksClientWithBaseURI(a.env.ResourceManagerEndpoint, subscriptionID)
 	a.virtualNetworkClient.Authorizer = authorizer
-	a.virtualNetworkClient.AddToUserAgent(azure)
+	_ = a.virtualNetworkClient.AddToUserAgent(UserAgent)
 	return nil
 }
 

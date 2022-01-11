@@ -6,7 +6,6 @@ import (
 	"net"
 	"strings"
 
-	ocpconfigv1 "github.com/openshift/api/config/v1"
 	google "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
@@ -14,7 +13,7 @@ import (
 )
 
 const (
-	gcp = string(ocpconfigv1.GCPPlatformType)
+	PlatformTypeGCP = "GCP"
 	// GCP hard-codes the amount of alias IPs that can be assigned to a NIC to 10 -
 	// independently of IP family, so we need to retrive the amount of alias IPs
 	// already in use by default and subtract from 10. See:
@@ -44,7 +43,16 @@ func (g *GCP) initCredentials() (err error) {
 		return err
 	}
 	g.project = secretData.ProjectID
-	g.client, err = google.NewService(g.ctx, option.WithCredentialsFile(cloudProviderSecretLocation+"service_account.json"))
+
+	opts := []option.ClientOption{
+		option.WithCredentialsJSON([]byte(rawSecretData)),
+		option.WithUserAgent(UserAgent),
+	}
+	if g.cfg.APIOverride != "" {
+		opts = append(opts, option.WithEndpoint(g.cfg.APIOverride))
+	}
+
+	g.client, err = google.NewService(g.ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("error: cannot initialize google client, err: %v", err)
 	}
