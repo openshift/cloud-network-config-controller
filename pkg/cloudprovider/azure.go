@@ -10,9 +10,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/profiles/latest/network/mgmt/network"
 	compute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-06-30/compute"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
+	"github.com/Azure/go-autorest/autorest/azure/auth"
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
 )
@@ -59,10 +59,6 @@ func (a *Azure) initCredentials() error {
 	if err != nil {
 		return err
 	}
-	authorizer, err := a.getAuthorizer(clientID, clientSecret, tenantID)
-	if err != nil {
-		return err
-	}
 
 	// Pick the Azure "Environment", which is just a named set of API endpoints.
 	if a.cfg.APIOverride != "" {
@@ -72,6 +68,11 @@ func (a *Azure) initCredentials() error {
 	}
 	if err != nil {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
+	}
+
+	authorizer, err := a.getAuthorizer(a.env, clientID, clientSecret, tenantID)
+	if err != nil {
+		return err
 	}
 
 	a.vmClient = compute.NewVirtualMachinesClientWithBaseURI(a.env.ResourceManagerEndpoint, subscriptionID)
@@ -347,16 +348,19 @@ func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string
 	return *virtualNetwork.AddressSpace.AddressPrefixes, nil
 }
 
-func (a *Azure) getAuthorizer(clientID string, clientSecret string, tenantID string) (autorest.Authorizer, error) {
-	oauthConfig, err := adal.NewOAuthConfig(azureapi.PublicCloud.ActiveDirectoryEndpoint, tenantID)
+func (a *Azure) getAuthorizer(env azureapi.Environment, clientID, clientSecret, tenantID string) (autorest.Authorizer, error) {
+	c := &auth.ClientCredentialsConfig{
+		TenantID:     tenantID,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		AADEndpoint:  env.ActiveDirectoryEndpoint,
+	}
+	c.Resource = env.TokenAudience
+	authorizer, err := c.Authorizer()
 	if err != nil {
 		return nil, err
 	}
-	spToken, err := adal.NewServicePrincipalToken(*oauthConfig, clientID, clientSecret, azureapi.PublicCloud.ResourceManagerEndpoint)
-	if err != nil {
-		return nil, err
-	}
-	return autorest.NewBearerAuthorizer(spToken), nil
+	return authorizer, nil
 }
 
 func getNameFromResourceID(id string) string {
