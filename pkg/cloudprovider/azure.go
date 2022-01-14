@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/latest/network/mgmt/network"
-	compute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2020-06-30/compute"
+	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/network/mgmt/network"
+	compute "github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
