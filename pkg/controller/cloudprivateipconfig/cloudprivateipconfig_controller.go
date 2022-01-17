@@ -142,10 +142,10 @@ func NewCloudPrivateIPConfigController(
 // that the IP is already assigned
 
 // - DELETE:
-// 1. Set status.conditions[0].Status = Pending (unset status.node)
+// 1. Set status.conditions[0].Status = Pending
 // 2. Send cloud API DELETE request
 // ...some time later
-// *	If OK: -
+// *	If OK: unset status.node
 // * 	If !OK: set status.node = spec.node and status.conditions[0].Status = Error && goto 1. by resync
 
 // - UPDATE:
@@ -186,6 +186,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// This is step 2. in the docbloc for the DELETE operation in the
 		// syncHandler
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+			Node: nodeToDel,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),
@@ -264,7 +265,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// This is step 2. in the docbloc for the ADD operation in the
 		// syncHandler
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-			Node: cloudPrivateIPConfig.Spec.Node,
+			Node: nodeToAdd,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),
@@ -308,6 +309,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			// If we couldn't even execute the assign request, set the status to
 			// failed.
 			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+				Node: nodeToAdd,
 				Conditions: []metav1.Condition{
 					{
 						Type:               string(cloudnetworkv1.Assigned),
@@ -328,7 +330,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// Add occurred and no error was encountered, keep status.node from
 		// above
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-			Node: cloudPrivateIPConfig.Status.Node,
+			Node: nodeToAdd,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),

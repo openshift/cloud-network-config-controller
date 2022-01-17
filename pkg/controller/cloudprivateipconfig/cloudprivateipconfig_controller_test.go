@@ -212,6 +212,7 @@ func TestSyncAddCloudPrivateIPConfig(t *testing.T) {
 					Node: nodeNameA,
 				},
 				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameA,
 					Conditions: []v1.Condition{
 						{
 							Type:   string(cloudnetworkv1.Assigned),
@@ -248,6 +249,7 @@ func TestSyncAddCloudPrivateIPConfig(t *testing.T) {
 					Node: nodeNameA,
 				},
 				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameA,
 					Conditions: []v1.Condition{
 						{
 							Type:   string(cloudnetworkv1.Assigned),
@@ -398,6 +400,7 @@ func TestSyncAddCloudPrivateIPConfig(t *testing.T) {
 					Node: nodeNameA,
 				},
 				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameA,
 					Conditions: []v1.Condition{
 						{
 							Type:   string(cloudnetworkv1.Assigned),
@@ -454,6 +457,7 @@ func TestSyncAddCloudPrivateIPConfig(t *testing.T) {
 					Node: nodeNameA,
 				},
 				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameA,
 					Conditions: []v1.Condition{
 						{
 							Type:   string(cloudnetworkv1.Assigned),
@@ -556,6 +560,7 @@ func TestSyncDeleteCloudPrivateIPConfig(t *testing.T) {
 					Node: nodeNameA,
 				},
 				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameA,
 					Conditions: []v1.Condition{
 						{
 							Type:   string(cloudnetworkv1.Assigned),
@@ -708,6 +713,7 @@ func TestSyncDeleteCloudPrivateIPConfig(t *testing.T) {
 					Node: nodeNameA,
 				},
 				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameA,
 					Conditions: []v1.Condition{
 						{
 							Type:   string(cloudnetworkv1.Assigned),
@@ -1017,6 +1023,7 @@ func TestSyncUpdateCloudPrivateIPConfig(t *testing.T) {
 					Node: nodeNameB,
 				},
 				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameB,
 					Conditions: []v1.Condition{
 						{
 							Type:   string(cloudnetworkv1.Assigned),
