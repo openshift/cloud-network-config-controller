@@ -204,7 +204,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 
 		// This is a blocking call. If the IP is not assigned then don't treat
 		// it as an error.
-		if err = c.cloudProviderClient.ReleasePrivateIP(ip, node); err != nil && !errors.Is(err, cloudprovider.NonExistingIPError) {
+		if releaseErr := c.cloudProviderClient.ReleasePrivateIP(ip, node); releaseErr != nil && !errors.Is(releaseErr, cloudprovider.NonExistingIPError) {
 			// Delete operation encountered an error, requeue
 			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
 				Node: nodeToDel,
@@ -222,9 +222,9 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			// Always requeue the object if we end up here. We need to make sure
 			// we try to clean up the IP on the cloud
 			if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
-				return fmt.Errorf("error updating CloudPrivateIPConfig: %q during delete operation, err: %v", key, err)
+				return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error releasing cloud assignment, err: %v", key, err)
 			}
-			return fmt.Errorf("error releasing CloudPrivateIPConfig: %q from node: %q, err: %v", key, node.Name, err)
+			return fmt.Errorf("error releasing CloudPrivateIPConfig: %q from node: %q, err: %v", key, node.Name, releaseErr)
 		}
 
 		// Process real object deletion. We're using a finalizer, so it depends
@@ -305,7 +305,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// This is a blocking call. If the IP is assigned (for ex: in case we
 		// were killed during the last sync but managed sending the cloud
 		// request away prior to that) then don't treat it as an error.
-		if err = c.cloudProviderClient.AssignPrivateIP(ip, node); err != nil && !errors.Is(err, cloudprovider.AlreadyExistingIPError) {
+		if assignErr := c.cloudProviderClient.AssignPrivateIP(ip, node); assignErr != nil && !errors.Is(assignErr, cloudprovider.AlreadyExistingIPError) {
 			// If we couldn't even execute the assign request, set the status to
 			// failed.
 			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
@@ -324,7 +324,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
 				return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error issuing cloud assignment, err: %v", key, err)
 			}
-			return fmt.Errorf("error assigning CloudPrivateIPConfig: %q to node: %q, err: %v", key, node.Name, err)
+			return fmt.Errorf("error assigning CloudPrivateIPConfig: %q to node: %q, err: %v", key, node.Name, assignErr)
 		}
 
 		// Add occurred and no error was encountered, keep status.node from
