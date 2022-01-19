@@ -1,9 +1,9 @@
 package cloudprovider
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 
 	google "google.golang.org/api/compute/v1"
@@ -25,24 +25,14 @@ const (
 // to the GCP cloud API
 type GCP struct {
 	CloudProvider
-	client  *google.Service
-	project string
-}
-
-type secretData struct {
-	ProjectID string `json:"project_id"`
+	client *google.Service
 }
 
 func (g *GCP) initCredentials() (err error) {
-	secretData := secretData{}
 	rawSecretData, err := g.readSecretData("service_account.json")
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal([]byte(rawSecretData), &secretData); err != nil {
-		return err
-	}
-	g.project = secretData.ProjectID
 
 	opts := []option.ClientOption{
 		option.WithCredentialsJSON([]byte(rawSecretData)),
@@ -64,11 +54,7 @@ func (g *GCP) initCredentials() (err error) {
 // GCP can return 10.0.32.25/32 or 10.0.32.25 - we thus need to check for both
 // when validating that the IP provided doesn't already exist
 func (g *GCP) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
-	instance, err := g.getInstance(node)
-	if err != nil {
-		return err
-	}
-	zone, err := g.parseZone(instance.Zone)
+	project, zone, instance, err := g.getInstance(node)
 	if err != nil {
 		return err
 	}
@@ -90,25 +76,22 @@ func (g *GCP) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	networkInterface.AliasIpRanges = append(networkInterface.AliasIpRanges, &google.AliasIpRange{
 		IpCidrRange: ip.String(),
 	})
-	operation, err := g.client.Instances.UpdateNetworkInterface(g.project, zone, instance.Name, networkInterface.Name, networkInterface).Do()
+	operation, err := g.client.Instances.UpdateNetworkInterface(project, zone, instance.Name, networkInterface.Name, networkInterface).Do()
 	if err != nil {
 		return err
 	}
-	return g.waitForCompletion(zone, operation.Name)
+	return g.waitForCompletion(project, zone, operation.Name)
 }
 
 // ReleasePrivateIP removes the IP alias from the associated instance.
 // Important: GCP IP aliases can come in all forms, i.e: if you add 10.0.32.25
 // GCP can return 10.0.32.25/32 or 10.0.32.25
 func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
-	instance, err := g.getInstance(node)
+	project, zone, instance, err := g.getInstance(node)
 	if err != nil {
 		return err
 	}
-	zone, err := g.parseZone(instance.Zone)
-	if err != nil {
-		return err
-	}
+
 	networkInterfaces, err := g.getNetworkInterfaces(instance)
 	if err != nil {
 		return err
@@ -136,15 +119,15 @@ func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 		return NonExistingIPError
 	}
 	networkInterface.AliasIpRanges = keepAliases
-	operation, err := g.client.Instances.UpdateNetworkInterface(g.project, zone, instance.Name, networkInterface.Name, networkInterface).Do()
+	operation, err := g.client.Instances.UpdateNetworkInterface(project, zone, instance.Name, networkInterface.Name, networkInterface).Do()
 	if err != nil {
 		return err
 	}
-	return g.waitForCompletion(zone, operation.Name)
+	return g.waitForCompletion(project, zone, operation.Name)
 }
 
 func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error) {
-	instance, err := g.getInstance(node)
+	project, _, instance, err := g.getInstance(node)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving instance associated with node, err: %v", err)
 	}
@@ -158,7 +141,7 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPCo
 		config := &NodeEgressIPConfiguration{
 			Interface: networkInterface.Name,
 		}
-		v4Subnet, v6Subnet, err := g.getSubnet(networkInterface)
+		v4Subnet, v6Subnet, err := g.getSubnet(project, networkInterface)
 		if err != nil {
 			return nil, fmt.Errorf("error retrieving the network interface subnets, err: %v", err)
 		}
@@ -182,18 +165,18 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPCo
 // queue. In the case of assignments of private IP addresses to instances, the
 // operation is added to the zone operations queue. Hence we need to keep the
 // opName and the zone the instance lives in.
-func (g *GCP) waitForCompletion(zone, opName string) error {
-	_, err := g.client.ZoneOperations.Wait(g.project, zone, opName).Do()
+func (g *GCP) waitForCompletion(project, zone, opName string) error {
+	_, err := g.client.ZoneOperations.Wait(project, zone, opName).Do()
 	return err
 }
 
-func (g *GCP) getSubnet(networkInterface *google.NetworkInterface) (*net.IPNet, *net.IPNet, error) {
+func (g *GCP) getSubnet(project string, networkInterface *google.NetworkInterface) (*net.IPNet, *net.IPNet, error) {
 	var v4Subnet, v6Subnet *net.IPNet
 	region, subnet, err := g.parseSubnet(networkInterface.Subnetwork)
 	if err != nil {
 		return nil, nil, err
 	}
-	subnetResult, err := g.client.Subnetworks.Get(g.project, region, subnet).Do()
+	subnetResult, err := g.client.Subnetworks.Get(project, region, subnet).Do()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -229,20 +212,19 @@ func (g *GCP) getCapacity(networkInterface *google.NetworkInterface) int {
 	return defaultGCPPrivateIPCapacity - currentIPv4Usage - currentIPv6Usage
 }
 
-//  This is what the node's providerID looks like on GCP
-// 	spec:
-//   providerID: gce://openshift-gce-devel-ci/us-east1-b/ci-ln-pvr3lyb-f76d1-6w8mm-master-0
-//  i.e: projectID/zone/instanceName
-func (g *GCP) getInstance(node *corev1.Node) (*google.Instance, error) {
-	providerData := strings.Split(node.Spec.ProviderID, "/")
-	if len(providerData) != 5 {
-		return nil, UnexpectedURIError(node.Spec.ProviderID)
-	}
-	instance, err := g.client.Instances.Get(providerData[len(providerData)-3], providerData[len(providerData)-2], providerData[len(providerData)-1]).Do()
+// getInstance retrieves the GCP instance referrred by the Node object.
+// returns the project and zone name as well.
+func (g *GCP) getInstance(node *corev1.Node) (string, string, *google.Instance, error) {
+	project, zone, instance, err := splitGCPNode(node)
 	if err != nil {
-		return nil, err
+		return "", "", nil, err
 	}
-	return instance, nil
+
+	i, err := g.client.Instances.Get(project, zone, instance).Do()
+	if err != nil {
+		return "", "", nil, err
+	}
+	return project, zone, i, nil
 }
 
 func (g *GCP) getNetworkInterfaces(instance *google.Instance) ([]*google.NetworkInterface, error) {
@@ -255,6 +237,29 @@ func (g *GCP) getNetworkInterfaces(instance *google.Instance) ([]*google.Network
 	return instance.NetworkInterfaces, nil
 }
 
+//  This is what the node's providerID looks like on GCP
+// 	spec:
+//   providerID: gce://openshift-gce-devel-ci/us-east1-b/ci-ln-pvr3lyb-f76d1-6w8mm-master-0
+//  i.e: projectID/zone/instanceName
+// split out and return these components
+func splitGCPNode(node *corev1.Node) (project, zone, instance string, err error) {
+	u, err := url.Parse(node.Spec.ProviderID)
+	if err != nil {
+		err = fmt.Errorf("failed to parse node %s provider id %s: %w", node.Name, node.Spec.ProviderID, err)
+		return
+	}
+	parts := strings.SplitN(u.Path, "/", 3)
+	if len(parts) != 3 {
+		err = fmt.Errorf("failed to parse node %s provider id %s: expected two path components", node.Name, node.Spec.ProviderID)
+		return
+	}
+
+	project = u.Host
+	zone = parts[1]
+	instance = parts[2]
+	return
+}
+
 // GCP Subnet URLs are defined as:
 // - https://www.googleapis.com/compute/v1/projects/project/regions/region/subnetworks/subnetwork
 // OR
@@ -265,16 +270,4 @@ func (g *GCP) parseSubnet(subnetURL string) (string, string, error) {
 		return "", "", UnexpectedURIError(subnetURL)
 	}
 	return subnetURLParts[len(subnetURLParts)-3], subnetURLParts[len(subnetURLParts)-1], nil
-}
-
-// GCP Zone URLs are defined as:
-// - https://www.googleapis.com/compute/v1/projects/openshift-gce-devel-ci/zones/us-east1-c
-// OR
-// - projects/project/zones/zone
-func (g *GCP) parseZone(zoneURL string) (string, error) {
-	zoneParts := strings.Split(zoneURL, "/")
-	if len(zoneParts) != 9 {
-		return "", UnexpectedURIError(zoneURL)
-	}
-	return zoneParts[len(zoneParts)-1], nil
 }
