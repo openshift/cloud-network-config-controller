@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +17,7 @@ import (
 	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
 	controller "github.com/openshift/cloud-network-config-controller/pkg/controller"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -142,10 +144,10 @@ func NewCloudPrivateIPConfigController(
 // that the IP is already assigned
 
 // - DELETE:
-// 1. Set status.conditions[0].Status = Pending (unset status.node)
+// 1. Set status.conditions[0].Status = Pending
 // 2. Send cloud API DELETE request
 // ...some time later
-// *	If OK: -
+// *	If OK: unset status.node
 // * 	If !OK: set status.node = spec.node and status.conditions[0].Status = Error && goto 1. by resync
 
 // - UPDATE:
@@ -186,6 +188,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// This is step 2. in the docbloc for the DELETE operation in the
 		// syncHandler
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+			Node: nodeToDel,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),
@@ -197,13 +200,13 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 				},
 			},
 		}
-		if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+		if cloudPrivateIPConfig, err = c.patchCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
 			return fmt.Errorf("error updating CloudPrivateIPConfig: %q during delete operation, err: %v", key, err)
 		}
 
 		// This is a blocking call. If the IP is not assigned then don't treat
 		// it as an error.
-		if err = c.cloudProviderClient.ReleasePrivateIP(ip, node); err != nil && !errors.Is(err, cloudprovider.NonExistingIPError) {
+		if releaseErr := c.cloudProviderClient.ReleasePrivateIP(ip, node); releaseErr != nil && !errors.Is(releaseErr, cloudprovider.NonExistingIPError) {
 			// Delete operation encountered an error, requeue
 			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
 				Node: nodeToDel,
@@ -220,10 +223,10 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			}
 			// Always requeue the object if we end up here. We need to make sure
 			// we try to clean up the IP on the cloud
-			if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
-				return fmt.Errorf("error updating CloudPrivateIPConfig: %q during delete operation, err: %v", key, err)
+			if cloudPrivateIPConfig, err = c.patchCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+				return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error releasing cloud assignment, err: %v", key, err)
 			}
-			return fmt.Errorf("error releasing CloudPrivateIPConfig: %q from node: %q, err: %v", key, node.Name, err)
+			return fmt.Errorf("error releasing CloudPrivateIPConfig: %q from node: %q, err: %v", key, node.Name, releaseErr)
 		}
 
 		// Process real object deletion. We're using a finalizer, so it depends
@@ -238,7 +241,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 				// it down below
 				controllerutil.RemoveFinalizer(cloudPrivateIPConfig, cloudPrivateIPConfigFinalizer)
 				klog.Infof("Cleaning up IP address and finalizer for CloudPrivateIPConfig: %q, deleting it completely", key)
-				_, err = c.updateCloudPrivateIPConfigFinalizer(cloudPrivateIPConfig)
+				_, err = c.patchCloudPrivateIPConfigFinalizer(cloudPrivateIPConfig)
 				return err
 			}
 		}
@@ -264,7 +267,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// This is step 2. in the docbloc for the ADD operation in the
 		// syncHandler
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-			Node: cloudPrivateIPConfig.Spec.Node,
+			Node: nodeToAdd,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),
@@ -276,7 +279,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 				},
 			},
 		}
-		if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+		if cloudPrivateIPConfig, err = c.patchCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
 			return fmt.Errorf("error updating CloudPrivateIPConfig: %q, err: %v", key, err)
 		}
 
@@ -291,7 +294,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			// +kubebuilder:subresource:status on the CRD marking the status as
 			// impossible to update for anything/anyone else except for this
 			// controller.
-			if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigFinalizer(cloudPrivateIPConfig); err != nil {
+			if cloudPrivateIPConfig, err = c.patchCloudPrivateIPConfigFinalizer(cloudPrivateIPConfig); err != nil {
 				return fmt.Errorf("error updating CloudPrivateIPConfig: %q, err: %v", key, err)
 			}
 		}
@@ -304,10 +307,11 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// This is a blocking call. If the IP is assigned (for ex: in case we
 		// were killed during the last sync but managed sending the cloud
 		// request away prior to that) then don't treat it as an error.
-		if err = c.cloudProviderClient.AssignPrivateIP(ip, node); err != nil && !errors.Is(err, cloudprovider.AlreadyExistingIPError) {
+		if assignErr := c.cloudProviderClient.AssignPrivateIP(ip, node); assignErr != nil && !errors.Is(assignErr, cloudprovider.AlreadyExistingIPError) {
 			// If we couldn't even execute the assign request, set the status to
 			// failed.
 			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+				Node: nodeToAdd,
 				Conditions: []metav1.Condition{
 					{
 						Type:               string(cloudnetworkv1.Assigned),
@@ -319,16 +323,16 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 					},
 				},
 			}
-			if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+			if cloudPrivateIPConfig, err = c.patchCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
 				return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error issuing cloud assignment, err: %v", key, err)
 			}
-			return fmt.Errorf("error assigning CloudPrivateIPConfig: %q to node: %q, err: %v", key, node.Name, err)
+			return fmt.Errorf("error assigning CloudPrivateIPConfig: %q to node: %q, err: %v", key, node.Name, assignErr)
 		}
 
 		// Add occurred and no error was encountered, keep status.node from
 		// above
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-			Node: cloudPrivateIPConfig.Status.Node,
+			Node: nodeToAdd,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),
@@ -342,56 +346,70 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		}
 		klog.Infof("Added IP address to node: %q for CloudPrivateIPConfig: %q", node.Name, key)
 	}
-	_, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status)
+	_, err = c.patchCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status)
 	return err
+}
+
+type StatusPatch struct {
+	Op    string                                    `json:"op"`
+	Path  string                                    `json:"path"`
+	Value cloudnetworkv1.CloudPrivateIPConfigStatus `json:"value"`
 }
 
 // updateCloudPrivateIPConfigStatus copies and updates the provided object and returns
 // the new object. The return value can be useful for recursive updates
-func (c *CloudPrivateIPConfigController) updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig *cloudnetworkv1.CloudPrivateIPConfig, status *cloudnetworkv1.CloudPrivateIPConfigStatus) (*cloudnetworkv1.CloudPrivateIPConfig, error) {
-	updatedCloudPrivateIPConfig := &cloudnetworkv1.CloudPrivateIPConfig{}
+func (c *CloudPrivateIPConfigController) patchCloudPrivateIPConfigStatus(cloudPrivateIPConfig *cloudnetworkv1.CloudPrivateIPConfig, status *cloudnetworkv1.CloudPrivateIPConfigStatus) (*cloudnetworkv1.CloudPrivateIPConfig, error) {
+	patchedCloudPrivateIPConfig := &cloudnetworkv1.CloudPrivateIPConfig{}
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		ctx, cancel := context.WithTimeout(c.ctx, controller.ClientTimeout)
-		defer cancel()
-
-		// Get the latest item from the store before updating. We risk updating
-		// and overriding any client changes if we don't get the latest state of
-		// the object and update the status on that item. Ex: if we are in the
-		// middle of updating the status on item v1, after an update to the
-		// object v2 has been performed we'll override the changes made to v2
-		// back to v1 when updating below (because cloudPrivateIPConfig above
-		// will have the old state before any potential client changes).
-		cloudPrivateIPConfigLatest, err := c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Get(ctx, cloudPrivateIPConfig.Name, metav1.GetOptions{})
-		if err != nil {
-			klog.Infof("CloudPrivateIPConfig: %q was deleted while processing an status update", cloudPrivateIPConfig.Name)
-			return nil
+		t := []StatusPatch{
+			{
+				Op:    "replace",
+				Path:  "/status",
+				Value: *status,
+			},
 		}
-		cloudPrivateIPConfigLatest.Status = *status
-		updatedCloudPrivateIPConfig, err = c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().UpdateStatus(ctx, cloudPrivateIPConfigLatest, metav1.UpdateOptions{})
+		op, err := json.Marshal(&t)
+		if err != nil {
+			return fmt.Errorf("error serializing status patch: %+v for CloudPrivateIPConfig: %s, err: %v", status, cloudPrivateIPConfig.Name, err)
+		}
+		patchedCloudPrivateIPConfig, err = c.patchCloudPrivateIPConfig(cloudPrivateIPConfig.Name, op)
 		return err
 	})
-	return updatedCloudPrivateIPConfig, err
+	return patchedCloudPrivateIPConfig, err
 }
 
-// updateCloudPrivateIPConfig copies and updates the provided object and returns
-// the new object. The return value can be useful for recursive updates
-func (c *CloudPrivateIPConfigController) updateCloudPrivateIPConfigFinalizer(cloudPrivateIPConfig *cloudnetworkv1.CloudPrivateIPConfig) (*cloudnetworkv1.CloudPrivateIPConfig, error) {
-	updatedCloudPrivateIPConfig := &cloudnetworkv1.CloudPrivateIPConfig{}
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		ctx, cancel := context.WithTimeout(c.ctx, controller.ClientTimeout)
-		defer cancel()
+type FinalizerPatch struct {
+	Op    string   `json:"op"`
+	Path  string   `json:"path"`
+	Value []string `json:"value"`
+}
 
-		// See: updateCloudPrivateIPConfigStatus
-		cloudPrivateIPConfigLatest, err := c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Get(ctx, cloudPrivateIPConfig.Name, metav1.GetOptions{})
-		if err != nil {
-			klog.Infof("CloudPrivateIPConfig: %q was deleted while processing an update", cloudPrivateIPConfig.Name)
-			return nil
+// patchCloudPrivateIPConfigFinalizer patches the object and returns
+// the new object. The return value can be useful for recursive updates
+func (c *CloudPrivateIPConfigController) patchCloudPrivateIPConfigFinalizer(cloudPrivateIPConfig *cloudnetworkv1.CloudPrivateIPConfig) (*cloudnetworkv1.CloudPrivateIPConfig, error) {
+	patchedCloudPrivateIPConfig := &cloudnetworkv1.CloudPrivateIPConfig{}
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		p := []FinalizerPatch{
+			{
+				Op:    "replace",
+				Path:  "/metadata/finalizers",
+				Value: cloudPrivateIPConfig.Finalizers,
+			},
 		}
-		cloudPrivateIPConfigLatest.Finalizers = cloudPrivateIPConfig.Finalizers
-		updatedCloudPrivateIPConfig, err = c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Update(ctx, cloudPrivateIPConfigLatest, metav1.UpdateOptions{})
+		op, err := json.Marshal(&p)
+		if err != nil {
+			return fmt.Errorf("error serializing finalizer patch: %+v for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfig.Finalizers, cloudPrivateIPConfig.Name, err)
+		}
+		patchedCloudPrivateIPConfig, err = c.patchCloudPrivateIPConfig(cloudPrivateIPConfig.Name, op)
 		return err
 	})
-	return updatedCloudPrivateIPConfig, err
+	return patchedCloudPrivateIPConfig, err
+}
+
+func (c *CloudPrivateIPConfigController) patchCloudPrivateIPConfig(name string, patchData []byte) (*cloudnetworkv1.CloudPrivateIPConfig, error) {
+	ctx, cancel := context.WithTimeout(c.ctx, controller.ClientTimeout)
+	defer cancel()
+	return c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Patch(ctx, name, types.JSONPatchType, patchData, metav1.PatchOptions{})
 }
 
 // getCloudPrivateIPConfig retrieves the object from the API server
