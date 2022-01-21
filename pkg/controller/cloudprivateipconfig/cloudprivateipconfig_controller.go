@@ -99,11 +99,17 @@ func NewCloudPrivateIPConfigController(
 			if !newCloudPrivateIPConfig.DeletionTimestamp.IsZero() &&
 				controllerutil.ContainsFinalizer(newCloudPrivateIPConfig, cloudPrivateIPConfigFinalizer) {
 				controller.Enqueue(new)
+				return
 			}
 			if !reflect.DeepEqual(oldCloudPrivateIPConfig.Spec, newCloudPrivateIPConfig.Spec) {
 				controller.Enqueue(new)
+				return
 			}
-			if oldCloudPrivateIPConfig.Spec.Node != newCloudPrivateIPConfig.Status.Node {
+			// Enqueue our own transitions from delete -> add. On delete we will
+			// unset the status node as to indicate that we finished removing
+			// the IP address from its current node, that will trigger this so
+			// that we process the sync adding the IP to the new node.
+			if oldCloudPrivateIPConfig.Status.Node != newCloudPrivateIPConfig.Status.Node {
 				controller.Enqueue(new)
 			}
 		},
