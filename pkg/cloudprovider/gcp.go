@@ -100,7 +100,7 @@ func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	// order GCP specifies.
 	networkInterface := networkInterfaces[0]
 	ipAssigned := false
-	keepAliases := []*google.AliasIpRange{}
+	var keepAliases []*google.AliasIpRange
 	for _, aliasIPRange := range networkInterface.AliasIpRanges {
 		if assignedIP := net.ParseIP(aliasIPRange.IpCidrRange); assignedIP != nil && !assignedIP.Equal(ip) {
 			keepAliases = append(keepAliases, aliasIPRange)
@@ -119,6 +119,8 @@ func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 		return NonExistingIPError
 	}
 	networkInterface.AliasIpRanges = keepAliases
+	// make sure that AliasIpRanges is always sent in the request, even if it is empty
+	networkInterface.ForceSendFields = append(networkInterface.ForceSendFields, "AliasIpRanges")
 	operation, err := g.client.Instances.UpdateNetworkInterface(project, zone, instance.Name, networkInterface.Name, networkInterface).Do()
 	if err != nil {
 		return err
