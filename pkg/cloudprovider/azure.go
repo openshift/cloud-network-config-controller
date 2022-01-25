@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/network/mgmt/network"
 	compute "github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
+	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/network/mgmt/network"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
@@ -283,7 +283,7 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 	// in the slice. Do it like this because it's assumed to not be guaranteed
 	// to be first in the slice returned by the Azure API?
 	for _, netif := range *instance.NetworkProfile.NetworkInterfaces {
-		if netif.Primary != nil && *netif.Primary {
+		if netif.NetworkInterfaceReferenceProperties != nil && netif.Primary != nil && *netif.Primary {
 			intf, err := a.getNetworkInterface(*netif.ID)
 			if err != nil {
 				return nil, err
@@ -294,13 +294,16 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 	}
 	// Get the rest and append that.
 	for _, netif := range *instance.NetworkProfile.NetworkInterfaces {
-		if (netif.Primary != nil && !*netif.Primary) || netif.Primary == nil {
+		if netif.NetworkInterfaceReferenceProperties != nil && ((netif.Primary != nil && !*netif.Primary) || netif.Primary == nil) {
 			intf, err := a.getNetworkInterface(*netif.ID)
 			if err != nil {
 				return nil, err
 			}
 			networkInterfaces = append(networkInterfaces, intf)
 		}
+	}
+	if len(networkInterfaces) == 0 {
+		return nil, NoNetworkInterfaceError
 	}
 	return networkInterfaces, nil
 }
