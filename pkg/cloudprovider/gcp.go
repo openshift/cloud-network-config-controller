@@ -168,8 +168,19 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPCo
 // operation is added to the zone operations queue. Hence we need to keep the
 // opName and the zone the instance lives in.
 func (g *GCP) waitForCompletion(project, zone, opName string) error {
-	_, err := g.client.ZoneOperations.Wait(project, zone, opName).Do()
-	return err
+	op, err := g.client.ZoneOperations.Wait(project, zone, opName).Do()
+	if err != nil {
+		return err
+	}
+
+	if op.Error != nil {
+		data, err := op.Error.MarshalJSON()
+		if err != nil {
+			return fmt.Errorf("failed marshaling error %v", op.Error)
+		}
+		return fmt.Errorf("%s", string(data))
+	}
+	return nil
 }
 
 func (g *GCP) getSubnet(project string, networkInterface *google.NetworkInterface) (*net.IPNet, *net.IPNet, error) {
