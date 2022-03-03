@@ -279,6 +279,16 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 		return nil, NoNetworkInterfaceError
 	}
 	networkInterfaces := []network.Interface{}
+	// When the VM has only a single NIC, don't rely on the presence of the Primary field, which is populated by
+	// NetworkInterfaceReferenceProperties, because it is not populated in some cases due to security restrictions
+	if len(*instance.NetworkProfile.NetworkInterfaces) == 1 {
+		intf, err := a.getNetworkInterface(*(*instance.NetworkProfile.NetworkInterfaces)[0].ID)
+		if err != nil {
+			return nil, err
+		}
+		networkInterfaces = append(networkInterfaces, intf)
+		return networkInterfaces, nil
+	}
 	// Try to get the ID corresponding to the "primary" NIC and put that first
 	// in the slice. Do it like this because it's assumed to not be guaranteed
 	// to be first in the slice returned by the Azure API?
