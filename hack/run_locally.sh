@@ -24,8 +24,8 @@ platformregion=$(oc get infrastructures.config.openshift.io cluster  -o jsonpath
 
 json=$(oc get secret cloud-credentials -n openshift-cloud-network-config-controller -o jsonpath='{.data}')
 for key in $(echo $json | jq -r 'keys[]'); do
-    value=$(echo $json | jq -r .$key | base64 -d)
-    printf $value>$SECRET_LOCATION/$key
+    value=$(echo $json | jq -r ".[\"$key\"]" | base64 -d)
+    echo $value>$SECRET_LOCATION/$key
 done
 
 export CONTROLLER_NAMESPACE="openshift-cloud-network-config-controller"
@@ -37,5 +37,6 @@ oc scale deployment cloud-network-config-controller -n openshift-cloud-network-c
 go run $ROOT/cmd/cloud-network-config-controller/main.go \
 	-kubeconfig $KUBECONFIG \
 	-platform-type $platformtype \
-	-platform-region $platformregion \
-	-secret-override $SECRET_LOCATION
+	-secret-name "cloud-credentials" \
+	-secret-override "$SECRET_LOCATION" \
+	-platform-region "$platformregion"
