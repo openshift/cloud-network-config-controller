@@ -303,6 +303,16 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 		}
 	}
 	if len(networkInterfaces) == 0 {
+		// Due to security restrictions access, the NIC's "primary" field is not enumerable.
+		// If we have NICs, then select the first in the list.
+		if len(*instance.NetworkProfile.NetworkInterfaces) > 0 {
+			intf, err := a.getNetworkInterface(*(*instance.NetworkProfile.NetworkInterfaces)[0].ID)
+			if err != nil {
+				return nil, err
+			}
+			networkInterfaces = append(networkInterfaces, intf)
+			return networkInterfaces, nil
+		}
 		return nil, NoNetworkInterfaceError
 	}
 	return networkInterfaces, nil
