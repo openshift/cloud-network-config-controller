@@ -193,11 +193,44 @@ cloud.network.openshift.io/egress-ipconfig: [{"interface": "$IFNAME/$IFID", "ifa
 
 # How to hack/debug
 
-When debugging this component make sure to do the following:
+When you want to debug this component, use one of the following methods.
 
-1. Run the `./hack/run-locally.sh`, but make sure you have a `KUBECONFIG`
-   initialized in your environment variables. If running against an OpenShift
-   cluster: the credentials will be copied locally to your computer. That being
-   said, you probably won't be able to talk to the cloud API endpoints from your
-   local development environment, so you might need to comment out code which is
-   non-essential to your testing.
+## Run locally
+
+If you want to run the operator directly on your computer, you can
+run the `./hack/run-locally.sh`, but make sure you have a `KUBECONFIG`
+initialized in your environment variables. If running against an OpenShift
+cluster: the credentials will be copied locally to your computer. That being
+said, you probably won't be able to talk to the cloud API endpoints from your
+local development environment, so you might need to comment out code which is
+non-essential to your testing.
+
+## Patch the operator to run from a new image
+
+If you have issues talking directly to the cloud API endpoints or if you want
+to test how the operator runs inside the actual container, use this method.
+
+Set up your own publicly accessible repository. For example, use a quay repository:
+~~~
+export CNCC_REPOSITORY="quay.io/akaris/cloud-network-config-controller"
+~~~
+
+If you prefer using docker instead of podman, run:
+~~~
+export CONTAINER_ENGINE="docker"
+~~~
+
+Run:
+~~~
+hack/run_in_cloud.sh
+~~~
+
+This will then build the container from the Dockerfile, tag the image as `${CNCC_REPOSITORY}:${UUID}`
+where `${UUID}` is a unique ID, push the image to the registry and patch the clusterversion operator
+and the network-operator so that this new image will be used.
+
+In order to rollback, run `oc edit clusterversion version` and remove the configuration in
+`/spec/overrides`. The clusterversion operator should then bring the cluster back to its
+original state.
+
+> Note: If the cloud-network-config-controller pod runs into authentication problems after using this method, it may be necessary to delete the pod manually to "kick" it.
