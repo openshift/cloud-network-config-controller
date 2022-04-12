@@ -326,21 +326,23 @@ func (a *Azure) getNetworkInterface(id string) (network.Interface, error) {
 
 // This is what the subnet ID looks like on Azure:
 // 	ID: "/subscriptions/d38f1e38-4bed-438e-b227-833f997adf6a/resourceGroups/ci-ln-wzc83kk-002ac-qcghn-rg/providers/Microsoft.Network/virtualNetworks/ci-ln-wzc83kk-002ac-qcghn-vnet/subnets/ci-ln-wzc83kk-002ac-qcghn-worker-subnet"
-func (a *Azure) getVirtualNetworkResourceGroupAndNameFromSubnetID(subnetID string) (string, string, error) {
+func (a *Azure) getNetworkResourceGroupAndSubnetAndNetnames(subnetID string) (string, string, string, error) {
 	providerData := strings.Split(subnetID, "/")
 	if len(providerData) != 11 {
-		return "", "", UnexpectedURIError(subnetID)
+		return "", "", "", UnexpectedURIError(subnetID)
 	}
-	return providerData[4], providerData[len(providerData)-3], nil
+	return providerData[4], providerData[len(providerData)-3], providerData[len(providerData)-1], nil
 }
 
 func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string, error) {
 	var virtualNetworkResourceGroup string
 	var virtualNetworkName string
+	var subnetName string
 	var err error
 	for _, ipConfiguration := range *networkInterface.IPConfigurations {
 		if *ipConfiguration.Primary {
-			virtualNetworkResourceGroup, virtualNetworkName, err = a.getVirtualNetworkResourceGroupAndNameFromSubnetID(*ipConfiguration.Subnet.ID)
+			virtualNetworkResourceGroup, virtualNetworkName, subnetName, err =
+				a.getNetworkResourceGroupAndSubnetAndNetnames(*ipConfiguration.Subnet.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -353,6 +355,19 @@ func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving subnet IP configuration, err: %v", err)
 	}
+	// Check the list of subnets first. If a subnet with the subnet name is found, then use that
+	// instead of virtualNetwork.AddressSpace.AddressPrefixes which only contains the main subnet's
+	// address prefix.
+	// FIXME: This might not work for IPv6.
+	if virtualNetwork.Subnets != nil {
+		for _, vns := range *virtualNetwork.Subnets {
+			if vns.Name != nil && vns.AddressPrefix != nil &&
+				*vns.Name == subnetName {
+				return []string{*vns.AddressPrefix}, nil
+			}
+		}
+	}
+
 	if virtualNetwork.AddressSpace == nil {
 		return nil, fmt.Errorf("nil subnet address space")
 	}
