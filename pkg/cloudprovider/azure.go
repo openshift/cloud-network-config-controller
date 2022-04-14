@@ -316,20 +316,21 @@ func (a *Azure) getNetworkInterface(id string) (network.Interface, error) {
 
 // This is what the subnet ID looks like on Azure:
 // 	ID: "/subscriptions/d38f1e38-4bed-438e-b227-833f997adf6a/resourceGroups/ci-ln-wzc83kk-002ac-qcghn-rg/providers/Microsoft.Network/virtualNetworks/ci-ln-wzc83kk-002ac-qcghn-vnet/subnets/ci-ln-wzc83kk-002ac-qcghn-worker-subnet"
-func (a *Azure) getVirtualNetworkNameFromSubnetID(subnetID string) (string, error) {
+func (a *Azure) getVirtualNetworkResourceGroupAndNameFromSubnetID(subnetID string) (string, string, error) {
 	providerData := strings.Split(subnetID, "/")
 	if len(providerData) != 11 {
-		return "", UnexpectedURIError(subnetID)
+		return "", "", UnexpectedURIError(subnetID)
 	}
-	return providerData[len(providerData)-3], nil
+	return providerData[4], providerData[len(providerData)-3], nil
 }
 
 func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string, error) {
+	var virtualNetworkResourceGroup string
 	var virtualNetworkName string
 	var err error
 	for _, ipConfiguration := range *networkInterface.IPConfigurations {
 		if *ipConfiguration.Primary {
-			virtualNetworkName, err = a.getVirtualNetworkNameFromSubnetID(*ipConfiguration.Subnet.ID)
+			virtualNetworkResourceGroup, virtualNetworkName, err = a.getVirtualNetworkResourceGroupAndNameFromSubnetID(*ipConfiguration.Subnet.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -338,7 +339,7 @@ func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
 	defer cancel()
-	virtualNetwork, err := a.virtualNetworkClient.Get(ctx, a.resourceGroup, virtualNetworkName, "")
+	virtualNetwork, err := a.virtualNetworkClient.Get(ctx, virtualNetworkResourceGroup, virtualNetworkName, "")
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving subnet IP configuration, err: %v", err)
 	}
