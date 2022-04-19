@@ -64,7 +64,11 @@ func (a *Azure) initCredentials() error {
 	if a.cfg.APIOverride != "" {
 		a.env, err = azure.EnvironmentFromURL(a.cfg.APIOverride)
 	} else {
-		a.env, err = azure.EnvironmentFromName(a.cfg.AzureEnvironment)
+		name := a.cfg.AzureEnvironment
+		if name == "" {
+			name = "AzurePublicCloud"
+		}
+		a.env, err = azure.EnvironmentFromName(name)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
