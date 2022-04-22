@@ -93,7 +93,7 @@ func main() {
 
 				cloudProviderClient, err := cloudprovider.NewCloudProviderClient(platformCfg)
 				if err != nil {
-					klog.Fatal("Error building cloud provider client, err: %v", err)
+					klog.Fatalf("Error building cloud provider client, err: %v", err)
 				}
 
 				kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, time.Minute*2, kubeinformers.WithNamespace(controllerNamespace))
