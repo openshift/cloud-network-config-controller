@@ -14,6 +14,7 @@ import (
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -160,11 +161,23 @@ func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	}
 	networkInterface.IPConfigurations = &keepIPConfiguration
 	// Send the request
-	result, err := a.createOrUpdate(networkInterface)
+	_, err = a.createOrUpdate(networkInterface)
 	if err != nil {
 		return err
 	}
-	return a.waitForCompletion(result)
+	return wait.PollImmediate(2*time.Second, 2*time.Minute, func() (done bool, err error) {
+		networkInterfaces, err := a.getNetworkInterfaces(instance)
+		if err != nil {
+			return false, err
+		}
+		networkInterface := networkInterfaces[0]
+		for _, ipConfiguration := range *networkInterface.IPConfigurations {
+			if assignedIP := net.ParseIP(*ipConfiguration.PrivateIPAddress); assignedIP != nil && assignedIP.Equal(ip) {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
 }
 
 func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error) {
