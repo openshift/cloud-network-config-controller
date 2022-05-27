@@ -1,6 +1,6 @@
 module github.com/openshift/cloud-network-config-controller
 
-go 1.17
+go 1.18
 
 require (
 	github.com/Azure/azure-sdk-for-go v53.1.0+incompatible
