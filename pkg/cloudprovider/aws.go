@@ -321,17 +321,14 @@ func (a *AWS) getInstanceCapacity(instance *ec2.Instance) (int, int, error) {
 	return instanceIPv4Capacity, instanceIPv6Capacity, nil
 }
 
-//  This is what the node's providerID looks like on AWS
-// 	spec:
-//   providerID: aws:///us-west-2a/i-008447f243eead273
-//  i.e: zone/instanceID
+// getInstance returns the EC2 Instance for the given node.
 func (a *AWS) getInstance(node *corev1.Node) (*ec2.Instance, error) {
-	providerData := strings.Split(node.Spec.ProviderID, "/")
-	if len(providerData) != 5 {
-		return nil, UnexpectedURIError(node.Spec.ProviderID)
+	instanceId, err := getInstanceIdFromProviderId(node.Spec.ProviderID)
+	if err != nil {
+		return nil, err
 	}
 	input := &ec2.DescribeInstancesInput{
-		InstanceIds: []*string{awsapi.String(providerData[len(providerData)-1])},
+		InstanceIds: []*string{awsapi.String(instanceId)},
 	}
 	result, err := a.client.DescribeInstances(input)
 	if err != nil {
@@ -347,4 +344,31 @@ func (a *AWS) getInstance(node *corev1.Node) (*ec2.Instance, error) {
 		return nil, fmt.Errorf("error: found conflicting instance replicas for node: %s, instances: %v", node.Name, instances)
 	}
 	return instances[0], nil
+}
+
+// getInstanceIdFromProviderId extracts the instance id from a given provider id.
+// The provider ID should normally be passed in with aws:///<zone>/<instanceID>
+// But it might also be passed in as aws://<zone>/<instanceID> and the zone might
+// be omitted.
+// This is what the node's providerID can look like on AWS (examples):
+//    spec:
+//      providerID: aws:///us-west-2a/i-008447f243eead273
+//      providerID: aws://us-west-2a/i-008447f243eead273
+//      providerID: aws:///i-008447f243eead273
+// see https://github.com/kubernetes/cloud-provider-aws/blob/5f394ba297bf280ceb3edfc38922630b4bd83f46/pkg/providers/v2/instances.go#L254
+func getInstanceIdFromProviderId(providerId string) (string, error) {
+	// after trimming 'aws://', the remainder will be in one of the following formats:
+	// * <availability-zone>/<instance-id>
+	// * /<availability-zone>/<instance-id>
+	// * <instance-id>
+	splitProviderId := strings.Split(strings.TrimPrefix(providerId, "aws://"), "/")
+	if len(splitProviderId) > 3 {
+		return "", UnexpectedURIError(providerId)
+	}
+	instanceId := splitProviderId[len(splitProviderId)-1]
+	if instanceId == "" {
+		return "", UnexpectedURIError(providerId)
+	}
+
+	return instanceId, nil
 }
