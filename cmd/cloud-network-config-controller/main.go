@@ -14,7 +14,6 @@ import (
 	nodecontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/node"
 	secretcontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/secret"
 	signals "github.com/openshift/cloud-network-config-controller/pkg/signals"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -63,6 +62,19 @@ func main() {
 		klog.Exitf("Error building kubernetes clientset: %s", err.Error())
 	}
 
+	rl, err := resourcelock.New(
+		resourcelock.ConfigMapsLeasesResourceLock,
+		controllerNamespace,
+		resourceLockName,
+		kubeClient.CoreV1(),
+		kubeClient.CoordinationV1(),
+		resourcelock.ResourceLockConfig{
+			Identity:      controllerName,
+		})
+	if err != nil {
+		klog.Exitf("Error building resource lock: %s", err.Error())
+	}
+
 	// set up leader election, the only reason for this is to make sure we only
 	// have one replica of this controller at any given moment in time. On
 	// upgrades there could be small windows where one replica of the deployment
@@ -70,16 +82,7 @@ func main() {
 	// could have both running at the same time. This prevents that from
 	// happening and ensures we only have one replica "controlling", always.
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
-		Lock: &resourcelock.ConfigMapLock{
-			ConfigMapMeta: metav1.ObjectMeta{
-				Name:      resourceLockName,
-				Namespace: controllerNamespace,
-			},
-			Client: kubeClient.CoreV1(),
-			LockConfig: resourcelock.ResourceLockConfig{
-				Identity: controllerName,
-			},
-		},
+		Lock:            rl,
 		ReleaseOnCancel: true,
 		LeaseDuration:   137 * time.Second, // leader election values from https://github.com/openshift/library-go/pull/1104
 		RenewDeadline:   107 * time.Second,
