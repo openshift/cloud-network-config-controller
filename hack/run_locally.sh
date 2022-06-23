@@ -17,22 +17,21 @@ SECRET_LOCATION=$ROOT/tmp-secret-location/
 mkdir -p $SECRET_LOCATION
 
 platformtype=$(oc get infrastructures.config.openshift.io cluster  -o jsonpath='{.status.platform}')
+export CONTROLLER_NAMESPACE="${CONTROLLER_NAMESPACE:-openshift-cloud-network-config-controller}"
+export CONTROLLER_NAME="${CONTROLLER_NAME:-tmp-local-controller}"
 
 # This won't work on platforms != AWS, but we don't care. 
 # The command won't fail and `cloudregion` is only used on AWS
 platformregion=$(oc get infrastructures.config.openshift.io cluster  -o jsonpath='{.status.platformStatus.aws.region}')
 
-json=$(oc get secret cloud-credentials -n openshift-cloud-network-config-controller -o jsonpath='{.data}')
+json=$(oc get secret cloud-credentials -n ${CONTROLLER_NAMESPACE} -o jsonpath='{.data}')
 for key in $(echo $json | jq -r 'keys[]'); do
     value=$(echo $json | jq -r ".[\"$key\"]" | base64 -d)
-    echo $value>$SECRET_LOCATION/$key
+    echo -n "$value">$SECRET_LOCATION/$key
 done
 
-export CONTROLLER_NAMESPACE="openshift-cloud-network-config-controller"
-export CONTROLLER_NAME="tmp-local-controller"
-
 oc scale deployment network-operator -n openshift-network-operator --replicas 0
-oc scale deployment cloud-network-config-controller -n openshift-cloud-network-config-controller --replicas 0
+oc scale deployment cloud-network-config-controller -n openshift-cloud-network-config-controller --replicas 0 || true
 
 go run $ROOT/cmd/cloud-network-config-controller/main.go \
 	-kubeconfig $KUBECONFIG \
