@@ -223,7 +223,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 						ObservedGeneration: cloudPrivateIPConfig.Generation,
 						LastTransitionTime: metav1.Now(),
 						Reason:             cloudResponseReasonError,
-						Message:            fmt.Sprintf("Error processing cloud release request, err: %v", err),
+						Message:            fmt.Sprintf("Error processing cloud release request, err: %v", releaseErr),
 					},
 				},
 			}
@@ -325,7 +325,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 						ObservedGeneration: cloudPrivateIPConfig.Generation,
 						LastTransitionTime: metav1.Now(),
 						Reason:             cloudResponseReasonError,
-						Message:            fmt.Sprintf("Error processing cloud assignment request, err: %v", err),
+						Message:            fmt.Sprintf("Error processing cloud assignment request, err: %v", assignErr),
 					},
 				},
 			}
