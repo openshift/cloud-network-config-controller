@@ -7,9 +7,13 @@ require (
 	github.com/Azure/go-autorest/autorest v0.11.24
 	github.com/Azure/go-autorest/autorest/azure/auth v0.5.11
 	github.com/aws/aws-sdk-go v1.37.8
+	github.com/google/uuid v1.1.2
+	github.com/gophercloud/gophercloud v0.25.1-0.20220718160629-0721d75e876f
+	github.com/gophercloud/utils v0.0.0-20220307143606-8e7800759d16
 	github.com/openshift/api v0.0.0-20210423140644-156ca80f8d83
 	github.com/openshift/client-go v0.0.0-20210503124028-ac0910aac9fa
 	google.golang.org/api v0.44.0
+	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.24.0
 	k8s.io/apimachinery v0.24.0
 	k8s.io/client-go v0.24.0
@@ -70,7 +74,6 @@ require (
 	google.golang.org/grpc v1.36.1 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	k8s.io/kube-openapi v0.0.0-20220328201542-3ee0da9b0b42 // indirect
 	sigs.k8s.io/json v0.0.0-20211208200746-9f7c6b3444d2 // indirect

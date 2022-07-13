@@ -132,6 +132,10 @@ func NewCloudProviderClient(cfg CloudProviderConfig) (CloudProviderIntf, error) 
 		cloudProviderIntf = &GCP{
 			CloudProvider: cp,
 		}
+	case PlatformTypeOpenStack:
+		cloudProviderIntf = &OpenStack{
+			CloudProvider: cp,
+		}
 	default:
 		return nil, fmt.Errorf("unsupported cloud provider platform type: %s", cfg.PlatformType)
 	}

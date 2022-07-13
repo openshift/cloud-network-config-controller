@@ -178,6 +178,57 @@ metadata:
 type: Opaque
 ```
 
+## OpenStack
+
+### Secret
+
+```
+tree /etc/secret/cloudprovider
+└── cloud.yaml
+```
+
+or as a Kubernetes secret defined as:
+
+```
+apiVersion: v1
+data:
+  clouds.yaml: <base64 string>
+kind: Secret
+metadata:
+  name: cloud-credentials
+  namespace: cloud-network-config-controller
+type: Opaque
+```
+### ConfigMap
+
+The Cluster Network Operator will create a ConfigMap named `kube-cloud-config`
+inside the CNCC's namespace and will mount this ConfigMap at location `/kube-cloud-config`.
+The CNCC will look for a file at location `/kube-cloud-config/ca-bundle.pem`. If the
+content of that file is != "", then the operator will assume that this is a valid CA chain
+and will use this data when talking to the OpenStack API.
+If parameter `-config-name=<name of ConfigMap>` is set to anything other than "",
+then the CNCC will start monitoring that ConfigMap for update or delete operations. If
+such an event gets triggered, the process will gracefully shutdown. Kubernetes will
+subsequently restart the container, thus spawning a process with updated configuration.
+The default value for `-config-name` is `kube-cloud-config`.
+
+```
+tree /kube-cloud-config
+└── ca-bundle.pem
+```
+
+Or as a Kubernetes ConfigMap defined as:
+
+```
+apiVersion: v1
+data:
+  ca-bundle.pem: <data>
+kind: ConfigMap
+metadata:
+  name: kube-cloud-config
+  namespace: openshift-cloud-network-config-controller
+```
+
 # Attributes affecting assignments - subnets / capacity / NICs
 
 Assigning private IP addresses to instances on the cloud comes with some

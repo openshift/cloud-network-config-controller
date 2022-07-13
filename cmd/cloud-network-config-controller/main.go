@@ -145,10 +145,11 @@ func main() {
 				}()
 				wg.Add(1)
 
-				// AWS uses a configmap "kube-cloud-config" to keep track of additional
+				// AWS and OpenStack use a configmap "kube-cloud-config" to keep track of additional
 				// data such as the ca-bundle.pem. Add a controller that restarts the operator if that configmap
 				// changes.
-				if configName != "" && platformCfg.PlatformType == cloudprovider.PlatformTypeAWS && platformCfg.AWSCAOverride != "" {
+				if configName != "" && ((platformCfg.PlatformType == cloudprovider.PlatformTypeAWS && platformCfg.AWSCAOverride != "") ||
+					platformCfg.PlatformType == cloudprovider.PlatformTypeOpenStack) {
 					klog.Infof("Starting the ConfigMap operator to monitor '%s'", configName)
 					configMapController := configmapcontroller.NewConfigMapController(
 						ctx,
