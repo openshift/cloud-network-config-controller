@@ -93,6 +93,8 @@ type: Opaque
 
 ## AWS
 
+### Secret
+
 ```
 tree /etc/secret/cloudprovider
 ├── aws_access_key_id 
@@ -111,6 +113,37 @@ metadata:
   name: cloud-credentials
   namespace: openshift-cloud-network-config-controller
 type: Opaque
+```
+
+### ConfigMap
+
+If `-platform-aws-ca-override=<file name>` is set then the CNCC expects to find
+a valid CA certificate chain at that location. This CA certificate chain will be
+used when talking to the AWS API.
+The Cluster Network Operator will create a ConfigMap named `kube-cloud-config`
+inside the CNCC's namespace and will mount this ConfigMap at location `/kube-cloud-config`.
+It will then set `-platform-aws-ca-override=/kube-cloud-config/ca-bundle.pem`.
+Additionally, if parameter `-config-name=<name of ConfigMap>` is set then the CNCC
+will start monitoring that ConfigMap for update or delete operations. If such
+an event gets triggered, the process will gracefully shutdown. Kubernetes will
+subsequently restart the container, thus spawning a process with updated configuration.
+The default value for `-config-name` is `kube-cloud-config`.
+
+```
+tree /kube-cloud-config
+└── ca-bundle.pem
+```
+
+Or as a Kubernetes ConfigMap defined as:
+
+```
+apiVersion: v1
+data:
+  ca-bundle.pem: <data>
+kind: ConfigMap
+metadata:
+  name: kube-cloud-config
+  namespace: openshift-cloud-network-config-controller
 ```
 
 ## Azure

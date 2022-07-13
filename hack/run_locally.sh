@@ -15,6 +15,8 @@ HERE=$(dirname "$(readlink --canonicalize "$BASH_SOURCE")")
 ROOT=$(readlink --canonicalize "$HERE/..")
 SECRET_LOCATION=$ROOT/tmp-secret-location/
 mkdir -p $SECRET_LOCATION
+CONFIG_LOCATION=$ROOT/tmp-config-location/
+mkdir -p $CONFIG_LOCATION
 
 platformtype=$(oc get infrastructures.config.openshift.io cluster  -o jsonpath='{.status.platform}')
 export CONTROLLER_NAMESPACE="${CONTROLLER_NAMESPACE:-openshift-cloud-network-config-controller}"
@@ -29,6 +31,11 @@ for key in $(echo $json | jq -r 'keys[]'); do
     value=$(echo $json | jq -r ".[\"$key\"]" | base64 -d)
     echo -n "$value">$SECRET_LOCATION/$key
 done
+json=$(oc get configmap kube-cloud-config -n ${CONTROLLER_NAMESPACE} -o jsonpath='{.data}' || echo "{}")
+for key in $(echo $json | jq -r 'keys[]'); do
+    value=$(echo $json | jq -r ".[\"$key\"]")
+    echo -n "$value">$CONFIG_LOCATION/$key
+done
 
 oc scale deployment network-operator -n openshift-network-operator --replicas 0
 oc scale deployment cloud-network-config-controller -n openshift-cloud-network-config-controller --replicas 0 || true
@@ -38,4 +45,6 @@ go run $ROOT/cmd/cloud-network-config-controller/main.go \
 	-platform-type $platformtype \
 	-secret-name "cloud-credentials" \
 	-secret-override "$SECRET_LOCATION" \
+	-config-name "kube-cloud-config" \
+	-config-override "$CONFIG_LOCATION" \
 	-platform-region "$platformregion"

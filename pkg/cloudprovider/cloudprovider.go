@@ -65,6 +65,7 @@ type CloudProviderConfig struct {
 	PlatformType  string // one of AWS, Azure, GCP
 	APIOverride   string // override the API endpoint URL. Used by all platforms.
 	CredentialDir string // override the default credential directory
+	ConfigDir     string // override the default config directory
 
 	Region        string // region, only used by AWS
 	AWSCAOverride string
