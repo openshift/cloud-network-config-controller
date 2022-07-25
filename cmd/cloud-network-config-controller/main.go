@@ -11,6 +11,7 @@ import (
 	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
 	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
 	cloudprivateipconfigcontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/cloudprivateipconfig"
+	configmapcontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/configmap"
 	nodecontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/node"
 	secretcontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/secret"
 	signals "github.com/openshift/cloud-network-config-controller/pkg/signals"
@@ -33,6 +34,7 @@ var (
 	kubeConfig          string
 	platformCfg         cloudprovider.CloudProviderConfig
 	secretName          string
+	configName          string
 	controllerName      string
 	controllerNamespace string
 )
@@ -69,7 +71,7 @@ func main() {
 		kubeClient.CoreV1(),
 		kubeClient.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
-			Identity:      controllerName,
+			Identity: controllerName,
 		})
 	if err != nil {
 		klog.Exitf("Error building resource lock: %s", err.Error())
@@ -142,6 +144,30 @@ func main() {
 					}
 				}()
 				wg.Add(1)
+
+				// AWS and OpenStack use a configmap "kube-cloud-config" to keep track of additional
+				// data such as the ca-bundle.pem. Add a controller that restarts the operator if that configmap
+				// changes.
+				if configName != "" && ((platformCfg.PlatformType == cloudprovider.PlatformTypeAWS && platformCfg.AWSCAOverride != "") ||
+					platformCfg.PlatformType == cloudprovider.PlatformTypeOpenStack) {
+					klog.Infof("Starting the ConfigMap operator to monitor '%s'", configName)
+					configMapController := configmapcontroller.NewConfigMapController(
+						ctx,
+						cancelFunc,
+						kubeClient,
+						kubeInformerFactory.Core().V1().ConfigMaps(),
+						configName,
+						controllerNamespace,
+					)
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						if err = configMapController.Run(stopCh); err != nil {
+							klog.Exitf("Error running ConfigMap controller: %s", err.Error())
+						}
+					}()
+				}
+
 				go func() {
 					defer wg.Done()
 					if err = nodeController.Run(stopCh); err != nil {
@@ -150,10 +176,10 @@ func main() {
 				}()
 			},
 			// There are two cases to consider for shutting down our controller.
-			//  1. Cloud credential rotation - which our secret controller
-			//     watches for and cancels the global context. That will trigger
-			//     an end to the leader election loop and call OnStoppedLeading
-			//     which will send a SIGTERM and shut down all controllers.
+			//  1. Cloud credential or configmap rotation - which our secret controller
+			//     and configmap controller watch for and cancel the global context.
+			//     That will trigger an end to the leader election loop and call
+			//     OnStoppedLeading which will send a SIGTERM and shut down all controllers.
 			//  2. Leader election rotation - which will send a SIGTERM and
 			//     shut down all controllers.
 			OnStoppedLeading: func() {
@@ -172,10 +198,12 @@ func init() {
 
 	// These are arguments for this controller
 	flag.StringVar(&secretName, "secret-name", "", "The cloud provider secret name - used for talking to the cloud API.")
+	flag.StringVar(&configName, "config-name", "kube-cloud-config", "The cloud provider config name - used for talking to the cloud API.")
 	flag.StringVar(&platformCfg.PlatformType, "platform-type", "", "The cloud provider platform type this component is running on.")
 	flag.StringVar(&platformCfg.Region, "platform-region", "", "The cloud provider platform region the cluster is deployed in, required for AWS")
 	flag.StringVar(&platformCfg.APIOverride, "platform-api-url", "", "The cloud provider API URL to use (instead of whatever default).")
 	flag.StringVar(&platformCfg.CredentialDir, "secret-override", "/etc/secret/cloudprovider", "The cloud provider secret location override, useful when running this component locally against a cluster")
+	flag.StringVar(&platformCfg.ConfigDir, "config-override", "/kube-cloud-config", "The cloud provider config location override, useful when running this component locally against a cluster")
 	flag.StringVar(&platformCfg.AzureEnvironment, "platform-azure-environment", "AzurePublicCloud", "The Azure environment name, used to select API endpoints")
 	flag.StringVar(&platformCfg.AWSCAOverride, "platform-aws-ca-override", "", "Path to a separate CA bundle to use when connecting to the AWS API")
 	flag.StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
