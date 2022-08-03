@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	compute "github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
@@ -14,6 +15,7 @@ import (
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -36,6 +38,8 @@ type Azure struct {
 	vmClient             compute.VirtualMachinesClient
 	virtualNetworkClient network.VirtualNetworksClient
 	networkClient        network.InterfacesClient
+	nodeMapLock          sync.Mutex
+	nodeLockMap          map[string]*sync.Mutex
 }
 
 func (a *Azure) initCredentials() error {
@@ -94,6 +98,11 @@ func (a *Azure) initCredentials() error {
 }
 
 func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
+	ipc := ip.String()
+	klog.Info("acquiring node lock for assigning ip address, node: %s, ip: %s", node.Name, ipc)
+	nodeLock := a.getNodeLock(node.Name)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
 	instance, err := a.getInstance(node)
 	if err != nil {
 		return err
@@ -108,8 +117,7 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	networkInterface := networkInterfaces[0]
 	// Assign the IP
 	ipConfigurations := *networkInterface.IPConfigurations
-	name := fmt.Sprintf("%s_%s", node.Name, ip.String())
-	ipc := ip.String()
+	name := fmt.Sprintf("%s_%s", node.Name, ipc)
 	untrue := false
 	newIPConfiguration := network.InterfaceIPConfiguration{
 		Name: &name,
@@ -132,6 +140,10 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 }
 
 func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
+	klog.Info("acquiring node lock for releasing ip address, node: %s, ip: %s", node.Name, ip.String())
+	nodeLock := a.getNodeLock(node.Name)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
 	instance, err := a.getInstance(node)
 	if err != nil {
 		return err
@@ -394,6 +406,17 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, clientID, clientSecret, 
 		return nil, err
 	}
 	return authorizer, nil
+}
+
+// getNodeLock retrieves node lock from nodeLockMap, If lock doesn't exist, then update map
+// with a new lock entry for the given node name.
+func (a *Azure) getNodeLock(nodeName string) *sync.Mutex {
+	a.nodeMapLock.Lock()
+	defer a.nodeMapLock.Unlock()
+	if _, ok := a.nodeLockMap[nodeName]; !ok {
+		a.nodeLockMap[nodeName] = &sync.Mutex{}
+	}
+	return a.nodeLockMap[nodeName]
 }
 
 func getNameFromResourceID(id string) string {
