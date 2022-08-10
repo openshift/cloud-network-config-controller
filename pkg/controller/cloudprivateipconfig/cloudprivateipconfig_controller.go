@@ -179,24 +179,96 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		return err
 	}
 
-	// At most one of nodeToAdd or nodeToDel will be set
-	nodeToAdd, nodeToDel := c.computeOp(cloudPrivateIPConfig)
+	nodeNameToAdd, nodeNameToDel := c.computeOp(cloudPrivateIPConfig)
 	switch {
 	// Dequeue on NOOP, there's nothing to do
-	case nodeToAdd == "" && nodeToDel == "":
+	case nodeNameToAdd == "" && nodeNameToDel == "":
 		return nil
-	case nodeToDel != "":
-		klog.Infof("CloudPrivateIPConfig: %q will be deleted from node: %q", key, nodeToDel)
-
-		node, err := c.nodesLister.Get(nodeToDel)
+	case nodeNameToAdd != "" && nodeNameToDel != "":
+		klog.Infof("CloudPrivateIPConfig: %q will be moved from node %q to node %q", key, nodeNameToDel, nodeNameToAdd)
+		nodeToDel, err := c.nodesLister.Get(nodeNameToDel)
+		if err != nil {
+			return err
+		}
+		nodeToAdd, err := c.nodesLister.Get(nodeNameToAdd)
 		if err != nil {
 			return err
 		}
 
-		// This is step 2. in the docbloc for the DELETE operation in the
+		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+			Node: nodeNameToDel,
+			Conditions: []metav1.Condition{
+				{
+					Type:               string(cloudnetworkv1.Assigned),
+					Status:             metav1.ConditionUnknown,
+					ObservedGeneration: cloudPrivateIPConfig.Generation,
+					LastTransitionTime: metav1.Now(),
+					Reason:             cloudResponseReasonPending,
+					Message:            "Moving IP address",
+				},
+			},
+		}
+		if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+			return fmt.Errorf("error updating CloudPrivateIPConfig: %q during move operation, err: %v", key, err)
+		}
+
+		// This is a blocking call. If the IP is not assigned then don't treat
+		// it as an error.
+		withMover, ok := c.cloudProviderClient.(cloudprovider.CloudProviderWithMoveIntf)
+		if !ok {
+			return fmt.Errorf("cannot convert driver to the interface with move abilities, this should never happen")
+		}
+		if moveErr := withMover.MovePrivateIP(ip, nodeToAdd, nodeToDel); moveErr != nil {
+			// Move operation encountered an error, requeue
+			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+				Node: nodeNameToDel,
+				Conditions: []metav1.Condition{
+					{
+						Type:               string(cloudnetworkv1.Assigned),
+						Status:             metav1.ConditionFalse,
+						ObservedGeneration: cloudPrivateIPConfig.Generation,
+						LastTransitionTime: metav1.Now(),
+						Reason:             cloudResponseReasonError,
+						Message:            fmt.Sprintf("Error processing cloud move request, err: %v", moveErr),
+					},
+				},
+			}
+			// Always requeue the object if we end up here. We need to make sure
+			// we try to clean up the IP on the cloud
+			if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+				return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error releasing cloud assignment, err: %v", key, err)
+			}
+			return fmt.Errorf("error moving CloudPrivateIPConfig: %q from node %q to %q, err: %v", key, nodeNameToDel, nodeNameToAdd, moveErr)
+		}
+		// Update the status one last time, informing consumers of this status
+		// that we've successfully moved the IP in the cloud
+		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+			Node: nodeNameToAdd,
+			Conditions: []metav1.Condition{
+				{
+					Type:               string(cloudnetworkv1.Assigned),
+					Status:             metav1.ConditionTrue,
+					ObservedGeneration: cloudPrivateIPConfig.Generation,
+					LastTransitionTime: metav1.Now(),
+					Reason:             cloudResponseReasonSuccess,
+					Message:            "IP address successfully moved",
+				},
+			},
+		}
+
+		klog.Infof("Moved IP address from node %q to %q for CloudPrivateIPConfig: %q", nodeNameToDel, nodeNameToAdd, key)
+	case nodeNameToDel != "":
+		klog.Infof("CloudPrivateIPConfig: %q will be deleted from node: %q", key, nodeNameToDel)
+
+		node, err := c.nodesLister.Get(nodeNameToDel)
+		if err != nil {
+			return err
+		}
+
+		// This is step 1. in the docbloc for the DELETE operation in the
 		// syncHandler
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-			Node: nodeToDel,
+			Node: nodeNameToDel,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),
@@ -217,7 +289,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		if releaseErr := c.cloudProviderClient.ReleasePrivateIP(ip, node); releaseErr != nil && !errors.Is(releaseErr, cloudprovider.NonExistingIPError) {
 			// Delete operation encountered an error, requeue
 			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-				Node: nodeToDel,
+				Node: nodeNameToDel,
 				Conditions: []metav1.Condition{
 					{
 						Type:               string(cloudnetworkv1.Assigned),
@@ -269,13 +341,13 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			},
 		}
 		klog.Infof("Deleted IP address from node: %q for CloudPrivateIPConfig: %q", node.Name, key)
-	case nodeToAdd != "":
-		klog.Infof("CloudPrivateIPConfig: %q will be added to node: %q", key, nodeToAdd)
+	case nodeNameToAdd != "":
+		klog.Infof("CloudPrivateIPConfig: %q will be added to node: %q", key, nodeNameToAdd)
 
-		// This is step 2. in the docbloc for the ADD operation in the
+		// This is step 1. in the docbloc for the ADD operation in the
 		// syncHandler
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-			Node: nodeToAdd,
+			Node: nodeNameToAdd,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),
@@ -307,7 +379,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			}
 		}
 
-		node, err := c.nodesLister.Get(nodeToAdd)
+		node, err := c.nodesLister.Get(nodeNameToAdd)
 		if err != nil {
 			return err
 		}
@@ -319,7 +391,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			// If we couldn't even execute the assign request, set the status to
 			// failed.
 			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-				Node: nodeToAdd,
+				Node: nodeNameToAdd,
 				Conditions: []metav1.Condition{
 					{
 						Type:               string(cloudnetworkv1.Assigned),
@@ -340,7 +412,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// Add occurred and no error was encountered, keep status.node from
 		// above
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-			Node: nodeToAdd,
+			Node: nodeNameToAdd,
 			Conditions: []metav1.Condition{
 				{
 					Type:               string(cloudnetworkv1.Assigned),
@@ -428,15 +500,21 @@ func (c *CloudPrivateIPConfigController) getCloudPrivateIPConfig(name string) (*
 	return cloudPrivateIPConfig, nil
 }
 
-// computeOp decides on what needs to be done given the state of the object.
+// computeOp decides on what needs to be done given the state of the object. Result is (nodeToAdd, nodeToDel),
+// meaning that plugin needs to remove the IP from nodeToDel and add IP to nodeToAdd. Both results are non-empty
+// only when the plugin implements cloudprovider.CloudProviderWithMoveIntf and in such case MovePrivateIP will be
+// called. Otherwise only one result will be populated and either AssignPrivateIP or ReleasePrivateIP will be called.
 func (c *CloudPrivateIPConfigController) computeOp(cloudPrivateIPConfig *cloudnetworkv1.CloudPrivateIPConfig) (string, string) {
 	// Delete if the deletion timestamp is set and we still have our finalizer listed
 	if !cloudPrivateIPConfig.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(cloudPrivateIPConfig, cloudPrivateIPConfigFinalizer) {
 		return "", cloudPrivateIPConfig.Status.Node
 	}
-	// If status and spec are different, delete the current object; we'll add it back with
-	// the updated value in the next sync.
+	// If status and spec are different, attempt to move it if driver allows that or delete the
+	// current object; we'll add it back with the updated value in the next sync
 	if cloudPrivateIPConfig.Spec.Node != cloudPrivateIPConfig.Status.Node && cloudPrivateIPConfig.Status.Node != "" {
+		if _, ok := c.cloudProviderClient.(cloudprovider.CloudProviderWithMoveIntf); ok {
+			return cloudPrivateIPConfig.Spec.Node, cloudPrivateIPConfig.Status.Node
+		}
 		return "", cloudPrivateIPConfig.Status.Node
 	}
 	// Add if the status is un-assigned or if the status is marked failed
