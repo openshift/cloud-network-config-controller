@@ -627,8 +627,7 @@ func TestOpenStackPlugin(t *testing.T) {
 				IPv6: "2000::/64",
 			},
 			Capacity: capacity{
-				IPv4: 63, // Ceiling of 64 - 1 allocated ports on the subnet.
-				IPv6: 63, // Ceiling of 64 - 1 allocated ports on the subnet.
+				IP: openstackMaxCapacity,
 			},
 		},
 		{
@@ -638,8 +637,7 @@ func TestOpenStackPlugin(t *testing.T) {
 				IPv6: "2001::/64",
 			},
 			Capacity: capacity{
-				IPv4: 63, // Ceiling of 64 - 1 allocated ports on the subnet.
-				IPv6: 63, // Ceiling of 64 - 1 allocated ports on the subnet.
+				IP: openstackMaxCapacity,
 			},
 		},
 	}
@@ -731,8 +729,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IPv4: openstackMaxCapacity - 3, // Max capacity - 1 fixed IP - 2 allocated IPs.
-					IPv6: openstackMaxCapacity - 1, // Max capacity - 1 fixed IP.
+					IP: openstackMaxCapacity - 2, // 2 allowed_address_pairs configured on the port.
 				},
 			},
 		},
@@ -745,8 +742,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IPv4: openstackMaxCapacity - 3, // Ceiling - 1 fixed IP - 2 allocated IPs.
-					IPv6: openstackMaxCapacity - 1, // Ceiling - 1 fixed IP.
+					IP: openstackMaxCapacity - 2, // 2 allowed_address_pairs configured on the port.
 				},
 			},
 		},

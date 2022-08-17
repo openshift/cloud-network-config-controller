@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -41,11 +40,15 @@ const (
 	// NOTE: Capacity is defined on a per interface basis as:
 	// - IP address capacity for each node, where the capacity is either IP family
 	//   agnostic or not.
-	// However, in OpenStack, we do not have such a thing as an interface capacity.
-	// Therefore, we settle on a sane ceiling of 64 IP addresses per interface.
-	// Should customers run into this ceiling, there should be no issue to raise it
-	// in the future.
-	openstackMaxCapacity = 64
+	// However, in OpenStack, we do have several possible ceilings such as port quotas and max_allowed_address_pairs.
+	// PortQuotas is the quota for the entire project and it might change based on admin settings. On the other hand,
+	// the PortQuota value should always be high enough and we should most likely not bother looking it up.
+	// However, max_allowed_address_pairs defaults to 10. It is only configurable in neutron.conf and there is no way
+	// to retrieve it through the API. In RHOSP, it defaults to 10, as well. Therefore, our best option is to set this
+	// to the default value of 10, always; and we might want to document that OSP environments must set
+	// max_allowed_address_pairs >= 10. For more details, see:
+	// https://github.com/openstack/neutron/blob/800f863ccc502b334cb2dd79ec54066440e43e27/neutron/conf/extensions/allowedaddresspairs.py#L21
+	openstackMaxCapacity = 10
 )
 
 // OpenStack implements the API wrapper for talking
@@ -433,7 +436,7 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgre
 // * If multiple IPv4 repectively multiple IPv6 subnets are attached to the same port, throw an error.
 // * The IP capacity is per port, per IP address family. It's ceiling is limited by the maximum of:
 //   a) The size of the subnet.
-//   b) An arbitrarily selected ceiling of 64.
+//   b) An arbitrarily selected ceiling of `openstackMaxCapacity`.
 //   The number of unique IP addresses in allowed_address_pair and fixed_ips is subtracted from that ceiling.
 //   Keep in mind that the subnet size is an upper limit for the subnet, the port quota an upper limit for the
 //   project but that IP capacity is a per port value.
@@ -445,8 +448,6 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgre
 // TODO: How to determine the primary AF?
 func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port) (*NodeEgressIPConfiguration, error) {
 	var ipv4, ipv6 string
-	var ipv4Prefix, ipv6Prefix int
-	var ipv4Cap, ipv6Cap int
 	var err error
 	var ip net.IP
 	var ipnet *net.IPNet
@@ -473,21 +474,16 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port)
 				return nil, fmt.Errorf("found multiple IPv4 subnets attached to port %s, this is not supported", p.ID)
 			}
 			ipv4 = ipnet.String()
-			ipv4Prefix, _ = ipnet.Mask.Size()
-			ipv4Cap = int(math.Min(float64(openstackMaxCapacity), math.Pow(2, 32-float64(ipv4Prefix))-2))
 		} else {
 			if ipv6 != "" {
 				return nil, fmt.Errorf("found multiple IPv6 subnets attached to port %s, this is not supported", p.ID)
 			}
 			ipv6 = ipnet.String()
-			ipv6Prefix, _ = ipnet.Mask.Size()
-			ipv6Cap = int(math.Min(float64(openstackMaxCapacity), math.Pow(2, 128-float64(ipv6Prefix))-2))
 		}
 
 	}
 
-	ipv4UsedIPs, ipv6UsedIPs := o.getIPsOnPort(p)
-
+	c := openstackMaxCapacity - len(p.AllowedAddressPairs)
 	return &NodeEgressIPConfiguration{
 		Interface: p.ID,
 		IFAddr: ifAddr{
@@ -495,37 +491,9 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port)
 			IPv6: ipv6,
 		},
 		Capacity: capacity{
-			IPv4: ipv4Cap - ipv4UsedIPs,
-			IPv6: ipv6Cap - ipv6UsedIPs,
+			IP: c,
 		},
 	}, nil
-}
-
-// getIPsOnPort returns the number of unique IP addresses on the given port.
-// Those include both IPs in the list of FixedIP addresses and in the list of
-// allowed_address_pairs. This method is a helper for getNeutronPortNodeEgressIPConfiguration
-// and as such does not test if multiple networks of the same address family are assigned to
-// the port, given that the calling method will already have done this.
-func (o *OpenStack) getIPsOnPort(p neutronports.Port) (int, int) {
-	ipv4UsedIPs := make(map[string]struct{})
-	ipv6UsedIPs := make(map[string]struct{})
-
-	for _, ip := range p.FixedIPs {
-		if utilnet.IsIPv4(net.ParseIP(ip.IPAddress)) {
-			ipv4UsedIPs[ip.IPAddress] = struct{}{}
-		} else {
-			ipv6UsedIPs[ip.IPAddress] = struct{}{}
-		}
-	}
-	for _, ip := range p.AllowedAddressPairs {
-		if utilnet.IsIPv4(net.ParseIP(ip.IPAddress)) {
-			ipv4UsedIPs[ip.IPAddress] = struct{}{}
-		} else {
-			ipv6UsedIPs[ip.IPAddress] = struct{}{}
-		}
-	}
-
-	return len(ipv4UsedIPs), len(ipv6UsedIPs)
 }
 
 // reserveNeutronIPAddress creates a new unattached neutron port with the given IP on
