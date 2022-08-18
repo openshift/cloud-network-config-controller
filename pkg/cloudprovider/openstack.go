@@ -814,8 +814,13 @@ func isIPAddressAllowedOnNeutronPort(p neutronports.Port, ip net.IP) bool {
 // getNovaServerIDFromProviderID extracts the nova server ID from the given providerID.
 func getNovaServerIDFromProviderID(providerID string) (string, error) {
 	serverID := strings.TrimPrefix(providerID, openstackProviderPrefix)
+	if serverID == providerID {
+		return "", UnexpectedURIError(fmt.Sprintf("%s; the provider ID does not contain expected prefix %s",
+			providerID, openstackProviderPrefix))
+	}
 	if _, err := uuid.Parse(serverID); err != nil {
-		return "", fmt.Errorf("cannot parse valid nova server ID from providerId '%s'", providerID)
+		return "", UnexpectedURIError(fmt.Sprintf("%s; error parsing UUID %q: %q",
+			providerID, serverID, err.Error()))
 	}
 	return serverID, nil
 }

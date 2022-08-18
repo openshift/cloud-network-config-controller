@@ -1257,12 +1257,14 @@ func TestGetNovaServerIDFromProviderID(t *testing.T) {
 			output: "91dcacbf-fa2a-40c8-a194-c3a51ab57062",
 		},
 		{
-			input:     "openstack://91dcacbf-fa2a-40c8-a194-c3a51ab57062",
-			errString: "cannot parse valid nova server ID from providerId 'openstack://91dcacbf-fa2a-40c8-a194-c3a51ab57062'",
+			input: "openstack://91dcacbf-fa2a-40c8-a194-c3a51ab57062",
+			errString: "the URI is not expected: openstack://91dcacbf-fa2a-40c8-a194-c3a51ab57062; " +
+				"the provider ID does not contain expected prefix openstack:///",
 		},
 		{
-			input:     "openstack:///91dcacbf-fa2a-40c8-a194-c3a51ab5706",
-			errString: "cannot parse valid nova server ID from providerId 'openstack:///91dcacbf-fa2a-40c8-a194-c3a51ab5706'",
+			input: "openstack:///91dcacbf-fa2a-40c8-a194-c3a51ab5706",
+			errString: "the URI is not expected: openstack:///91dcacbf-fa2a-40c8-a194-c3a51ab5706; " +
+				"error parsing UUID \"91dcacbf-fa2a-40c8-a194-c3a51ab5706\": \"invalid UUID length: 35\"",
 		},
 	}
 
