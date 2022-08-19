@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/gophercloud/gophercloud"
@@ -55,8 +56,10 @@ const (
 // to the OpenStack API
 type OpenStack struct {
 	CloudProvider
-	novaClient    *gophercloud.ServiceClient
-	neutronClient *gophercloud.ServiceClient
+	novaClient       *gophercloud.ServiceClient
+	neutronClient    *gophercloud.ServiceClient
+	portLockMapMutex sync.Mutex
+	portLockMap      map[string]*sync.Mutex
 }
 
 // initCredentials initializes the cloud API credentials by reading the
@@ -602,6 +605,12 @@ func (o *OpenStack) getNeutronPortWithIPAddressAndMachineID(s neutronsubnets.Sub
 
 // allowIPAddressOnNeutronPort adds the specified IP address to the port's allowed_address_pairs.
 func (o *OpenStack) allowIPAddressOnNeutronPort(portID string, ip net.IP) error {
+	// Needed due to neutron bug  https://bugzilla.redhat.com/show_bug.cgi?id=2119199.
+	klog.Info("Getting port lock for portID %s and IP %s", portID, ip.String())
+	portLock := o.getLockForPort(portID)
+	portLock.Lock()
+	defer portLock.Unlock()
+
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Always get the most recent copy of this port.
 		p, err := neutronports.Get(o.neutronClient, portID).Extract()
@@ -650,6 +659,12 @@ func (o *OpenStack) allowIPAddressOnNeutronPort(portID string, ip net.IP) error 
 
 // unallowIPAddressOnNeutronPort removes the specified IP address from the port's allowed_address_pairs.
 func (o *OpenStack) unallowIPAddressOnNeutronPort(portID string, ip net.IP) error {
+	// Needed due to neutron bug  https://bugzilla.redhat.com/show_bug.cgi?id=2119199.
+	klog.Info("Getting port lock for portID %s and IP %s", portID, ip.String())
+	portLock := o.getLockForPort(portID)
+	portLock.Lock()
+	defer portLock.Unlock()
+
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Always get the most recent copy of this port.
 		p, err := neutronports.Get(o.neutronClient, portID).Extract()
@@ -796,4 +811,18 @@ func getNovaServerIDFromProviderID(providerID string) (string, error) {
 // generateDeviceID is a tiny helper to allow us to work around https://bugzilla.redhat.com/show_bug.cgi?id=2109162.
 func generateDeviceID(serverID string) string {
 	return fmt.Sprintf("%s_%s", egressIPTag, serverID)
+}
+
+// getLockForPort returns a sync.Mutex for port with portID.
+func (o *OpenStack) getLockForPort(portID string) *sync.Mutex {
+	o.portLockMapMutex.Lock()
+	defer o.portLockMapMutex.Unlock()
+
+	if o.portLockMap == nil {
+		o.portLockMap = make(map[string]*sync.Mutex)
+	}
+	if _, ok := o.portLockMap[portID]; !ok {
+		o.portLockMap[portID] = &sync.Mutex{}
+	}
+	return o.portLockMap[portID]
 }
