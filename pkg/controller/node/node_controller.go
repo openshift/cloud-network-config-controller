@@ -90,6 +90,8 @@ func (n *NodeController) SyncHandler(key string) error {
 	if _, ok := node.Annotations[nodeEgressIPConfigAnnotationKey]; ok {
 		return nil
 	}
+	klog.Infof("akaris --- node: %v", node)
+	klog.Infof("akaris --- node.taints: %v", node.Spec.Taints)
 	nodeEgressIPConfigs, err := n.cloudProviderClient.GetNodeEgressIPConfiguration(node)
 	if err != nil {
 		return fmt.Errorf("error retrieving the private IP configuration for node: %s, err: %v", node.Name, err)
