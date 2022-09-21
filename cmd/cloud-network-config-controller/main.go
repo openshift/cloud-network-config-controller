@@ -184,7 +184,7 @@ func main() {
 			//     shut down all controllers.
 			OnStoppedLeading: func() {
 				klog.Info("Stopped leading, sending SIGTERM and shutting down controller")
-				signals.ShutDown()
+				_ = signals.ShutDown()
 				// This only needs to wait if we were ever leader
 				wg.Wait()
 			},

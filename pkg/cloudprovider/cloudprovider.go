@@ -22,7 +22,7 @@ var (
 const UserAgent = "cloud-network-config-controller"
 
 func UnexpectedURIError(uri string) error {
-	return errors.New(fmt.Sprintf("%s: %s", UnexpectedURIErrorString, uri))
+	return fmt.Errorf("%s: %s", UnexpectedURIErrorString, uri)
 }
 
 type CloudProviderIntf interface {
