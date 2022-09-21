@@ -334,9 +334,7 @@ func (a *AWS) getInstance(node *corev1.Node) (*ec2.Instance, error) {
 	}
 	instances := []*ec2.Instance{}
 	for _, reservation := range result.Reservations {
-		for _, instance := range reservation.Instances {
-			instances = append(instances, instance)
-		}
+		instances = append(instances, reservation.Instances...)
 	}
 	if len(instances) != 1 {
 		return nil, fmt.Errorf("error: found conflicting instance replicas for node: %s, instances: %v", node.Name, instances)

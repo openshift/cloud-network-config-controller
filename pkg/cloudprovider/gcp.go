@@ -157,7 +157,7 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPCo
 		config.Capacity = capacity{
 			IP: g.getCapacity(networkInterface),
 		}
-		return []*NodeEgressIPConfiguration{config}, nil
+		return []*NodeEgressIPConfiguration{config}, nil //nolint:staticcheck
 	}
 	return nil, nil
 }
