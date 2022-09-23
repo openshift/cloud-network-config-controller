@@ -9,6 +9,7 @@ import (
 	"time"
 
 	awsapi "github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	corev1 "k8s.io/api/core/v1"
@@ -31,10 +32,19 @@ func (a *AWS) initCredentials() error {
 	sessionOpts := session.Options{
 		SharedConfigState: session.SharedConfigEnable,
 		SharedConfigFiles: []string{filepath.Join(a.cfg.CredentialDir, "credentials")},
+		Config:            awsapi.Config{Region: &a.cfg.Region},
 	}
-	c := awsapi.NewConfig().WithRegion(a.cfg.Region)
 	if a.cfg.APIOverride != "" {
-		c = c.WithEndpoint(a.cfg.APIOverride)
+		customResolver := func(service, region string, optFns ...func(*endpoints.Options)) (endpoints.ResolvedEndpoint, error) {
+			if service == endpoints.Ec2ServiceID {
+				return endpoints.ResolvedEndpoint{
+					URL:           a.cfg.APIOverride,
+					SigningRegion: a.cfg.Region,
+				}, nil
+			}
+			return endpoints.DefaultResolver().EndpointFor(service, region, optFns...)
+		}
+		sessionOpts.Config.EndpointResolver = endpoints.ResolverFunc(customResolver)
 	}
 	if a.cfg.AWSCAOverride != "" {
 		var err error
@@ -49,7 +59,7 @@ func (a *AWS) initCredentials() error {
 		return fmt.Errorf("could not initialize AWS session: %w", err)
 	}
 
-	a.client = ec2.New(mySession, c)
+	a.client = ec2.New(mySession)
 	return nil
 }
 
