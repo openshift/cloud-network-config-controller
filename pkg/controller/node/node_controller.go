@@ -7,12 +7,14 @@ import (
 	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/klog/v2"
 
 	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
@@ -67,6 +69,16 @@ func NewNodeController(
 
 	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.Enqueue,
+		UpdateFunc: func(oldN, newN interface{}) {
+			// Enqueue when an update to the node's taints occurred - for external cloud providers, we must
+			// catch changes to taint node.cloudprovider.kubernetes.io/uninitialized.
+			// See https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/
+			oldNode, _ := oldN.(*corev1.Node)
+			newNode, _ := newN.(*corev1.Node)
+			if !reflect.DeepEqual(oldNode.Spec.Taints, newNode.Spec.Taints) {
+				controller.Enqueue(newN)
+			}
+		},
 	})
 	return controller
 }
@@ -88,6 +100,13 @@ func (n *NodeController) SyncHandler(key string) error {
 	// when it started existing. It's up to the network plugin to track how much
 	// capacity it has left depending on the assignments it performs.
 	if _, ok := node.Annotations[nodeEgressIPConfigAnnotationKey]; ok {
+		return nil
+	}
+	// Skip synchronization if this node is still uninitialized by the Cloud Controller Manager,
+	// meaning that it still has taint cloudproviderapi.TaintExternalCloudProvider.
+	if taintKeyExists(node.Spec.Taints, cloudproviderapi.TaintExternalCloudProvider) {
+		klog.V(5).Info("Taint '%s' found on node, skipping until the node is ready",
+			cloudproviderapi.TaintExternalCloudProvider)
 		return nil
 	}
 	nodeEgressIPConfigs, err := n.cloudProviderClient.GetNodeEgressIPConfiguration(node)
@@ -127,4 +146,15 @@ func (n *NodeController) generateAnnotation(nodeEgressIPConfigs []*cloudprovider
 		return "", fmt.Errorf("error serializing cloud subnet annotation, err: %v", err)
 	}
 	return string(serialized), nil
+}
+
+// TaintKeyExists checks if the given taint key exists in list of taints. Returns true if exists false otherwise.
+// Copied from k8s.io/kubernetes/pkg/util/taints/taints.go to avoid dependency hell.
+func taintKeyExists(taints []v1.Taint, taintKeyToMatch string) bool {
+	for _, taint := range taints {
+		if taint.Key == taintKeyToMatch {
+			return true
+		}
+	}
+	return false
 }
