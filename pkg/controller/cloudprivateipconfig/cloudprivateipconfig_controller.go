@@ -229,7 +229,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			}
 			// Always requeue the object if we end up here. We need to make sure
 			// we try to clean up the IP on the cloud
-			if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+			if _, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
 				return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error releasing cloud assignment, err: %v", key, err)
 			}
 			return fmt.Errorf("error releasing CloudPrivateIPConfig: %q from node: %q, err: %v", key, node.Name, releaseErr)
@@ -329,7 +329,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 					},
 				},
 			}
-			if cloudPrivateIPConfig, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+			if _, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
 				return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error issuing cloud assignment, err: %v", key, err)
 			}
 			return fmt.Errorf("error assigning CloudPrivateIPConfig: %q to node: %q, err: %v", key, node.Name, assignErr)
