@@ -3,6 +3,7 @@ package cloudprovider
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -26,7 +27,12 @@ const (
 	// https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/azure-subscription-service-limits?toc=/azure/virtual-network/toc.json#networking-limits
 	defaultAzurePrivateIPCapacity = 256
 	// defaultAzureOperationTimeout is the timeout for all Azure operations
-	defaultAzureOperationTimeout = 10 * time.Second
+	defaultAzureOperationTimeout = 180 * time.Second
+	// azureWaitForCompletionTimeout is the maximum time to wait for Azure to report successful
+	// IP address assignment or removal. Azure is quite slow with this, so wait for at least 3 minutes.
+	// If we look at the Azure examples, they even use a 5 minute timeout:
+	// https://github.com/Azure-Samples/azure-sdk-for-go-samples/blob/d9f41170eaf6958209047f42c8ae4d0536577422/services/network/hybrid/network_test.go#L121
+	azureWaitForCompletionTimeout = 180 * time.Second
 )
 
 // Azure implements the API wrapper for talking
@@ -136,7 +142,37 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	if err != nil {
 		return err
 	}
-	return a.waitForCompletion(result)
+	klog.Info("akaris -----------> a.waitForCompletion(%v)", result)
+	//  return a.waitForCompletion(result)
+	res := a.waitForCompletion(result)
+	klog.Info("akaris -----------> a.waitForCompletion end: res: %v", res)
+	if res == nil {
+		networkInterfaces, err := a.getNetworkInterfaces(instance)
+		if err != nil {
+			return err
+		}
+		// Perform the operation against the first interface listed, which will be
+		// the primary interface (if it's defined as such) or the first one returned
+		// following the order Azure specifies.
+		networkInterface := networkInterfaces[0]
+		// Release the IP
+		ipAssigned := false
+		for _, ipConfiguration := range *networkInterface.IPConfigurations {
+			assignedIP := net.ParseIP(*ipConfiguration.PrivateIPAddress)
+			klog.Infof("akaris ------------> assignedIP: %s", assignedIP)
+			klog.Infof("akaris ------------> provState: %s", *ipConfiguration.ProvisioningState)
+			secGroups := ipConfiguration.ApplicationSecurityGroups
+			klog.Infof("akaris ------------> secgroups: %v", secGroups)
+			klog.Infof("akaris ------------> full info: %v", ipConfiguration)
+			klog.Infof("akaris ------------> alloc method: %v", ipConfiguration.PrivateIPAllocationMethod)
+			if assignedIP != nil && assignedIP.Equal(ip) {
+				ipAssigned = true
+				klog.Infof("akaris ------------> ASSSSSSSIIIIIIGGGNNNNED!!!")
+			}
+		}
+		klog.Infof("akaris ------------> ipAssigned: %t", ipAssigned)
+	}
+	return res
 }
 
 func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
@@ -223,7 +259,9 @@ func (a *Azure) waitForCompletion(result network.InterfacesCreateOrUpdateFuture)
 	// No specified timeout for this operation, because a valid value doesn't
 	// seem possible to estimate. Note: Azure has some defaults defined here:
 	// https://github.com/Azure/go-autorest/blob/master/autorest/client.go#L32-L44
-	return result.WaitForCompletionRef(context.TODO(), a.networkClient.Client)
+	ctx, cancel := context.WithTimeout(context.Background(), azureWaitForCompletionTimeout)
+	defer cancel()
+	return result.WaitForCompletionRef(ctx, a.networkClient.Client)
 }
 
 func (a *Azure) getSubnet(networkInterface network.Interface) (*net.IPNet, *net.IPNet, error) {
@@ -337,7 +375,18 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 func (a *Azure) getNetworkInterface(id string) (network.Interface, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
 	defer cancel()
-	return a.networkClient.Get(ctx, a.resourceGroup, getNameFromResourceID(id), "")
+	log.Printf("akaris -----> getNetworkInterface id %s", id)
+	res, err := a.networkClient.Get(ctx, a.resourceGroup, getNameFromResourceID(id), "")
+	for _, ipConfiguration := range *res.IPConfigurations {
+		assignedIP := net.ParseIP(*ipConfiguration.PrivateIPAddress)
+		klog.Infof("akaris ------------> getNetworkInterface assignedIP: %s", assignedIP)
+		klog.Infof("akaris ------------> getNetworkInterface provState: %s", *ipConfiguration.ProvisioningState)
+		secGroups := ipConfiguration.ApplicationSecurityGroups
+		klog.Infof("akaris ------------> getNetworkInterface secgroups: %v", secGroups)
+		klog.Infof("akaris ------------> getNetworkInterface full info: %v", ipConfiguration)
+		klog.Infof("akaris ------------> getNetworkInterface alloc method: %v", ipConfiguration.PrivateIPAllocationMethod)
+	}
+	return res, err
 }
 
 // This is what the subnet ID looks like on Azure:

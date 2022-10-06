@@ -28,6 +28,7 @@ import (
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/logger"
 	"github.com/Azure/go-autorest/tracing"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -130,6 +131,7 @@ func (f Future) PollingMethod() PollingMethodType {
 func (f *Future) DoneWithContext(ctx context.Context, sender autorest.Sender) (done bool, err error) {
 	ctx = tracing.StartSpan(ctx, "github.com/Azure/go-autorest/autorest/azure/async.DoneWithContext")
 	defer func() {
+		klog.Info("akaris ---------------> herez")
 		sc := -1
 		resp := f.Response()
 		if resp != nil {
@@ -138,27 +140,50 @@ func (f *Future) DoneWithContext(ctx context.Context, sender autorest.Sender) (d
 		tracing.EndSpan(ctx, sc, err)
 	}()
 
+	klog.Info("akaris ---------------> herea")
 	if f.pt == nil {
+		klog.Info("akaris ---------------> hereb")
 		return false, autorest.NewError("Future", "Done", "future is not initialized")
 	}
+	klog.Info("akaris ---------------> herec")
 	if f.pt.hasTerminated() {
+		klog.Info("akaris ---------------> hered")
 		return true, f.pt.pollingError()
 	}
+	klog.Info("akaris ---------------> heree")
 	if err := f.pt.pollForStatus(ctx, sender); err != nil {
+		klog.Info("akaris ---------------> heref")
 		return false, err
 	}
+	klog.Info("akaris ---------------> hereg")
 	if err := f.pt.checkForErrors(); err != nil {
+		klog.Info("akaris ---------------> hereh")
 		return f.pt.hasTerminated(), err
 	}
+	klog.Info("akaris ---------------> herei")
 	if err := f.pt.updatePollingState(f.pt.provisioningStateApplicable()); err != nil {
+		klog.Info("akaris ---------------> herej")
 		return false, err
 	}
+	klog.Info("akaris ---------------> herek")
 	if err := f.pt.initPollingMethod(); err != nil {
+		klog.Info("akaris ---------------> herel")
 		return false, err
 	}
+	klog.Info("akaris ---------------> herem")
 	if err := f.pt.updatePollingMethod(); err != nil {
+		klog.Info("akaris ---------------> heren")
 		return false, err
 	}
+	klog.Info("akaris ---------------> hereo")
+	klog.Infof("akaris ---------------> hasTerminated: %t, pollingError: %q", f.pt.hasTerminated(), f.pt.pollingError())
+
+	klog.Infof("akaris ---------------> checkforerrors %v", f.pt.checkForErrors())
+	klog.Infof("akaris ---------------> hasFailed %v", f.pt.hasFailed())
+	klog.Infof("akaris ---------------> hassucceeded %v", f.pt.hasSucceeded())
+	klog.Infof("akaris ---------------> latestresponse %v", f.pt.latestResponse())
+	klog.Infof("akaris ---------------> FinalGetURI %v", f.pt.finalGetURL())
+
 	return f.pt.hasTerminated(), f.pt.pollingError()
 }
 
@@ -199,6 +224,7 @@ func (f Future) GetPollingDelay() (time.Duration, bool) {
 func (f *Future) WaitForCompletionRef(ctx context.Context, client autorest.Client) (err error) {
 	ctx = tracing.StartSpan(ctx, "github.com/Azure/go-autorest/autorest/azure/async.WaitForCompletionRef")
 	defer func() {
+		klog.Info("akaris ---------------> here0")
 		sc := -1
 		resp := f.Response()
 		if resp != nil {
@@ -206,25 +232,39 @@ func (f *Future) WaitForCompletionRef(ctx context.Context, client autorest.Clien
 		}
 		tracing.EndSpan(ctx, sc, err)
 	}()
+	klog.Info("akaris ---------------> here1")
 	cancelCtx := ctx
 	// if the provided context already has a deadline don't override it
 	_, hasDeadline := ctx.Deadline()
 	if d := client.PollingDuration; !hasDeadline && d != 0 {
+		klog.Info("akaris ---------------> here1b")
 		var cancel context.CancelFunc
 		cancelCtx, cancel = context.WithTimeout(ctx, d)
 		defer cancel()
 	}
+	klog.Infof("akaris ---------------> pollingduration %v", client.PollingDuration)
+	akd, ako := cancelCtx.Deadline()
+	klog.Infof("akaris ---------------> context timeout %v", akd, ako)
+	klog.Info("akaris ---------------> here2")
 	// if the initial response has a Retry-After, sleep for the specified amount of time before starting to poll
 	if delay, ok := f.GetPollingDelay(); ok {
+		klog.Info("akaris ---------------> here2b")
+		klog.Infof("akaris ---------------> delay %v", delay)
 		logger.Instance.Writeln(logger.LogInfo, "WaitForCompletionRef: initial polling delay")
 		if delayElapsed := autorest.DelayForBackoff(delay, 0, cancelCtx.Done()); !delayElapsed {
+			klog.Info("akaris ---------------> here2c")
 			err = cancelCtx.Err()
 			return
 		}
 	}
+	klog.Info("akaris ---------------> here3")
 	done, err := f.DoneWithContext(ctx, client)
+	klog.Infof("akaris ---------------> done: %t, err: %v", done, err)
 	for attempts := 0; !done; done, err = f.DoneWithContext(ctx, client) {
+		klog.Info("akaris ---------------> here4")
+		klog.Infof("akaris ---------------> done: %t, err: %v", done, err)
 		if attempts >= client.RetryAttempts {
+			klog.Info("akaris ---------------> here4b")
 			return autorest.NewErrorWithError(err, "Future", "WaitForCompletion", f.pt.latestResponse(), "the number of retries has been exceeded")
 		}
 		// we want delayAttempt to be zero in the non-error case so
@@ -232,14 +272,18 @@ func (f *Future) WaitForCompletionRef(ctx context.Context, client autorest.Clien
 		var delayAttempt int
 		var delay time.Duration
 		if err == nil {
+			klog.Info("akaris ---------------> here5")
 			// check for Retry-After delay, if not present use the client's polling delay
 			var ok bool
 			delay, ok = f.GetPollingDelay()
+			klog.Infof("akaris ---------------> delay: %v, ok: %t", delay, ok)
 			if !ok {
+				klog.Info("akaris ---------------> here6")
 				logger.Instance.Writeln(logger.LogInfo, "WaitForCompletionRef: Using client polling delay")
 				delay = client.PollingDelay
 			}
 		} else {
+			klog.Info("akaris ---------------> here7")
 			// there was an error polling for status so perform exponential
 			// back-off based on the number of attempts using the client's retry
 			// duration.  update attempts after delayAttempt to avoid off-by-one.
@@ -250,10 +294,13 @@ func (f *Future) WaitForCompletionRef(ctx context.Context, client autorest.Clien
 		}
 		// wait until the delay elapses or the context is cancelled
 		delayElapsed := autorest.DelayForBackoff(delay, delayAttempt, cancelCtx.Done())
+		klog.Info("akaris ---------------> here8")
 		if !delayElapsed {
+			klog.Info("akaris ---------------> here9")
 			return autorest.NewErrorWithError(cancelCtx.Err(), "Future", "WaitForCompletion", f.pt.latestResponse(), "context has been cancelled")
 		}
 	}
+	klog.Info("akaris ---------------> here10")
 	return
 }
 
