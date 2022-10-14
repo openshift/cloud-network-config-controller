@@ -1,6 +1,7 @@
 package cloudprovider
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -30,9 +32,13 @@ type AWS struct {
 }
 
 func (a *AWS) initCredentials() error {
+	f, err := sharedCredentialsFileFromDirectory(a.cfg.CredentialDir)
+	if err != nil {
+		return err
+	}
 	sessionOpts := session.Options{
 		SharedConfigState: session.SharedConfigEnable,
-		SharedConfigFiles: []string{filepath.Join(a.cfg.CredentialDir, "credentials")},
+		SharedConfigFiles: []string{f},
 		Config:            awsapi.Config{Region: &a.cfg.Region},
 	}
 	if a.cfg.APIOverride != "" {
@@ -377,4 +383,54 @@ func getInstanceIdFromProviderId(providerId string) (string, error) {
 	}
 
 	return instanceId, nil
+}
+
+// sharedCredentialsFileFromDirectory returns a location (path) to the shared credentials file that was created
+// using the data in the provided directory.
+// This is heavily inspired and partially copied verbatim from:
+// https://github.com/openshift/cluster-ingress-operator/blob/1600a0e349ef075fcb52ab65b33445e256358ab8/pkg/util/aws/shared_credentials_file.go#L26
+// If file ${dir}/credentials exists then sharedCredentialsFileFromDirectory simply returns that string.
+// Otherwise if such a file does not exist, sharedCredentialsFileFromDirectory will attempt to build a credentials
+// file from ${dir}/aws_access_key_id and ${dir}/aws_secret_access_key.
+func sharedCredentialsFileFromDirectory(dir string) (string, error) {
+	fCredentials := filepath.Join(dir, "credentials")
+	fAccessKeyID := filepath.Join(dir, "aws_access_key_id")
+	fSecretAccessKey := filepath.Join(dir, "aws_secret_access_key")
+
+	if _, err := os.Stat(fCredentials); err == nil {
+		return fCredentials, nil
+	}
+
+	klog.Infof("Could not find file %s, trying to build temp file from %s and %s",
+		fCredentials, fAccessKeyID, fSecretAccessKey)
+
+	accessKeyID, err := os.ReadFile(fAccessKeyID)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to read file %s", fAccessKeyID)
+	}
+	secretAccessKey, err := os.ReadFile(fSecretAccessKey)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to read file %s", fSecretAccessKey)
+	}
+	data := newConfigForStaticCreds(string(accessKeyID), string(secretAccessKey))
+
+	f, err := os.CreateTemp("", "aws-shared-credentials")
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create file for shared credentials")
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		return "", errors.Wrapf(err, "failed to write credentials to %s", f.Name())
+	}
+	return f.Name(), nil
+}
+
+// newConfigForStaticCreds is copied verbatim from:
+// https://github.com/openshift/cluster-ingress-operator/blob/1600a0e349ef075fcb52ab65b33445e256358ab8/pkg/util/aws/shared_credentials_file.go#L52
+func newConfigForStaticCreds(accessKey string, accessSecret string) []byte {
+	buf := &bytes.Buffer{}
+	fmt.Fprint(buf, "[default]\n")
+	fmt.Fprintf(buf, "aws_access_key_id = %s\n", accessKey)
+	fmt.Fprintf(buf, "aws_secret_access_key = %s\n", accessSecret)
+	return buf.Bytes()
 }
