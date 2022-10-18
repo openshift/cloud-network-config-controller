@@ -126,6 +126,7 @@ func (o *OpenStack) initCredentials() error {
 		transport := http.Transport{}
 		certPool.AppendCertsFromPEM([]byte(userCACert))
 		transport.TLSClientConfig = &tls.Config{RootCAs: certPool}
+		transport.Proxy = http.ProxyFromEnvironment
 		provider.HTTPClient = http.Client{Transport: &transport}
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("could not parse file '%s', err: %q", caBundle, err)
