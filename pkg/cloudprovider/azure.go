@@ -10,10 +10,13 @@ import (
 
 	compute "github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
 	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/network/mgmt/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/jongio/azidext/go/azidext"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -395,17 +398,40 @@ func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string
 }
 
 func (a *Azure) getAuthorizer(env azureapi.Environment, clientID, clientSecret, tenantID string) (autorest.Authorizer, error) {
-	c := &auth.ClientCredentialsConfig{
-		TenantID:     tenantID,
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		AADEndpoint:  env.ActiveDirectoryEndpoint,
+	var cloudConfig cloud.Configuration
+	switch env {
+	case azureapi.PublicCloud:
+		cloudConfig = cloud.AzurePublic
+	case azureapi.USGovernmentCloud:
+		cloudConfig = cloud.AzureGovernment
+	case azureapi.ChinaCloud:
+		cloudConfig = cloud.AzureChina
+	default: // StackCloud ?
+		cloudConfig = cloud.Configuration{
+			ActiveDirectoryAuthorityHost: env.ActiveDirectoryEndpoint,
+			Services: map[cloud.ServiceName]cloud.ServiceConfiguration{
+				cloud.ResourceManager: {
+					Audience: env.TokenAudience,
+					Endpoint: env.ResourceManagerEndpoint,
+				},
+			},
+		}
 	}
-	c.Resource = env.TokenAudience
-	authorizer, err := c.Authorizer()
+	options := azidentity.ClientSecretCredentialOptions{
+		ClientOptions: azcore.ClientOptions{
+			Cloud: cloudConfig,
+		},
+	}
+	cred, err := azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, &options)
 	if err != nil {
 		return nil, err
 	}
+	scope := env.TokenAudience
+	if !strings.HasPrefix(scope, "/.default") {
+		scope += "/.default"
+	}
+	authorizer := azidext.NewTokenCredentialAdapter(cred, []string{scope})
+
 	return authorizer, nil
 }
 
