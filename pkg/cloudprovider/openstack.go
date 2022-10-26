@@ -21,6 +21,8 @@ import (
 	neutronsubnets "github.com/gophercloud/gophercloud/openstack/networking/v2/subnets"
 	"github.com/gophercloud/gophercloud/pagination"
 	"github.com/gophercloud/utils/openstack/clientconfig"
+	v1 "github.com/openshift/api/cloudnetwork/v1"
+	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -387,7 +389,7 @@ func (o *OpenStack) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 // * The interface is keyed by a neutron UUID
 // This function should only be called when no egress IPs have been added to the node,
 // it will return an incorrect "egress IP capacity" otherwise.
-func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error) {
+func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
 	if node == nil {
 		return nil, fmt.Errorf("invalid nil pointer provided for node when trying to get node EgressIP configuration")
 	}
@@ -409,7 +411,7 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgre
 	cidrs := make(map[string]struct{})
 	for _, p := range serverPorts {
 		// Retrieve configuration for this port.
-		config, err := o.getNeutronPortNodeEgressIPConfiguration(p)
+		config, err := o.getNeutronPortNodeEgressIPConfiguration(p, cloudPrivateIPConfigs)
 		if err != nil {
 			return nil, err
 		}
@@ -450,7 +452,7 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgre
 // TODO: As a solution, we currently report the EgressIP configuration for every attached interface, but other plugins
 // do not do this. Is the upper layer compatible with that?
 // TODO: How to determine the primary AF?
-func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port) (*NodeEgressIPConfiguration, error) {
+func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) (*NodeEgressIPConfiguration, error) {
 	var ipv4, ipv6 string
 	var err error
 	var ip net.IP
@@ -465,6 +467,7 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port)
 	// Loop over all subnets. OpenStack potentially has several IPv4 or IPv6 subnets per port, but the
 	// CloudPrivateIPConfig expects only a single subnet of each address family per port. Throw an error
 	// in such a case.
+	var cloudPrivateIPsCount int
 	for _, s := range subnets {
 		// Parse CIDR information into ip and ipnet.
 		ip, ipnet, err = net.ParseCIDR(s.CIDR)
@@ -484,10 +487,20 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port)
 			}
 			ipv6 = ipnet.String()
 		}
-
+		// Loop over all cloudPrivateIPConfigs and check if they are part of this ipnet.
+		// If the IP is contained in the ipnet, increase cloudPrivateIPsCount.
+		for _, cpic := range cloudPrivateIPConfigs {
+			cip, _, err := cloudprivateipconfig.NameToIP(cpic.Name)
+			if err != nil {
+				return nil, err
+			}
+			if ipnet.Contains(cip) {
+				cloudPrivateIPsCount++
+			}
+		}
 	}
 
-	c := openstackMaxCapacity - len(p.AllowedAddressPairs)
+	c := openstackMaxCapacity + cloudPrivateIPsCount - len(p.AllowedAddressPairs)
 	return &NodeEgressIPConfiguration{
 		Interface: p.ID,
 		IFAddr: ifAddr{
