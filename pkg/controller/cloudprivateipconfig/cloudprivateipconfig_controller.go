@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"reflect"
-	"strings"
 
 	cloudnetworkv1 "github.com/openshift/api/cloudnetwork/v1"
 	cloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	cloudnetworkscheme "github.com/openshift/client-go/cloudnetwork/clientset/versioned/scheme"
 	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1"
 	cloudnetworklisters "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
+	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
 	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
 	controller "github.com/openshift/cloud-network-config-controller/pkg/controller"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -175,7 +174,10 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		return nil
 	}
 
-	ip := cloudPrivateIPConfigNameToIP(cloudPrivateIPConfig.Name)
+	ip, _, err := cloudprivateipconfig.NameToIP(cloudPrivateIPConfig.Name)
+	if err != nil {
+		return err
+	}
 
 	// At most one of nodeToAdd or nodeToDel will be set
 	nodeToAdd, nodeToDel := c.computeOp(cloudPrivateIPConfig)
@@ -443,26 +445,4 @@ func (c *CloudPrivateIPConfigController) computeOp(cloudPrivateIPConfig *cloudne
 	}
 	// Default to NOOP
 	return "", ""
-}
-
-// cloudPrivateIPConfigNameToIP converts the resource name to net.IP. Given a
-// limitation in the Kubernetes API server (see:
-// https://github.com/kubernetes/kubernetes/pull/100950)
-// CloudPrivateIPConfig.metadata.name cannot represent an IPv6 address. To
-// work-around this limitation it was decided that the network plugin creating
-// the CR will fully expand the IPv6 address and replace all colons with dots,
-// ex:
-
-// The IPv6 address fc00:f853:ccd:e793::54 will be represented
-// as: fc00.f853.0ccd.e793.0000.0000.0000.0054
-
-// We thus need to replace every fifth character's dot with a colon.
-func cloudPrivateIPConfigNameToIP(name string) net.IP {
-	// handle IPv4: this is enough since it will be serialized just fine
-	if ip := net.ParseIP(name); ip != nil {
-		return ip
-	}
-	// handle IPv6
-	name = strings.ReplaceAll(name, ".", ":")
-	return net.ParseIP(name)
 }

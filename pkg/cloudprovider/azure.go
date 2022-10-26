@@ -14,6 +14,7 @@ import (
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
+	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -179,7 +180,7 @@ func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	return a.waitForCompletion(result)
 }
 
-func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error) {
+func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
 	instance, err := a.getInstance(node)
 	if err != nil {
 		return nil, err
@@ -208,7 +209,7 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIP
 		config.IFAddr.IPv6 = v6Subnet.String()
 	}
 	config.Capacity = capacity{
-		IP: a.getCapacity(networkInterface),
+		IP: a.getCapacity(networkInterface, len(cloudPrivateIPConfigs)),
 	}
 	return []*NodeEgressIPConfiguration{config}, nil
 }
@@ -253,7 +254,7 @@ func (a *Azure) getSubnet(networkInterface network.Interface) (*net.IPNet, *net.
 // We need to retrieve the amounts assigned to the node by default and subtract
 // that from the default 256 value. Note: there is also a "Private IP addresses
 // per virtual network" quota, but that's 65.536, so we can skip that.
-func (a *Azure) getCapacity(networkInterface network.Interface) int {
+func (a *Azure) getCapacity(networkInterface network.Interface, cloudPrivateIPsCount int) int {
 	currentIPv4Usage, currentIPv6Usage := 0, 0
 	for _, ipConfiguration := range *networkInterface.IPConfigurations {
 		if assignedIP := net.ParseIP(*ipConfiguration.PrivateIPAddress); assignedIP != nil {
@@ -264,7 +265,7 @@ func (a *Azure) getCapacity(networkInterface network.Interface) int {
 			}
 		}
 	}
-	return defaultAzurePrivateIPCapacity - currentIPv4Usage - currentIPv6Usage
+	return defaultAzurePrivateIPCapacity + cloudPrivateIPsCount - currentIPv4Usage - currentIPv6Usage
 }
 
 // This is what the node's providerID looks like on Azure
