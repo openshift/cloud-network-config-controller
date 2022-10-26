@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -62,7 +63,7 @@ func (f *FakeCloudProvider) waitForCompletion() error {
 	return nil
 }
 
-func (f *FakeCloudProvider) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error) {
+func (f *FakeCloudProvider) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
 	if f.mockErrorOnGetNodeEgressIPConfiguration {
 		return nil, fmt.Errorf("Get node egress IP configuration failed")
 	}

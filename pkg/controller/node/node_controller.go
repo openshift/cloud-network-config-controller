@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -17,6 +18,9 @@ import (
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/klog/v2"
 
+	cloudnetworkv1 "github.com/openshift/api/cloudnetwork/v1"
+	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1"
+	cloudnetworklisters "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
 	controller "github.com/openshift/cloud-network-config-controller/pkg/controller"
 )
@@ -35,8 +39,9 @@ var (
 // cloud network config controller
 type NodeController struct {
 	controller.CloudNetworkConfigController
-	kubeClient  kubernetes.Interface
-	nodesLister corelisters.NodeLister
+	kubeClient                 kubernetes.Interface
+	nodesLister                corelisters.NodeLister
+	cloudPrivateIPConfigLister cloudnetworklisters.CloudPrivateIPConfigLister
 	// cloudProviderClient is a client interface allowing the controller
 	// access to the cloud API
 	cloudProviderClient cloudprovider.CloudProviderIntf
@@ -51,13 +56,15 @@ func NewNodeController(
 	controllerContext context.Context,
 	kubeClientset kubernetes.Interface,
 	cloudProviderClient cloudprovider.CloudProviderIntf,
-	nodeInformer coreinformers.NodeInformer) *controller.CloudNetworkConfigController {
+	nodeInformer coreinformers.NodeInformer,
+	cloudPrivateIPConfigInformer cloudnetworkinformers.CloudPrivateIPConfigInformer) *controller.CloudNetworkConfigController {
 
 	nodeController := &NodeController{
-		nodesLister:         nodeInformer.Lister(),
-		kubeClient:          kubeClientset,
-		cloudProviderClient: cloudProviderClient,
-		ctx:                 controllerContext,
+		nodesLister:                nodeInformer.Lister(),
+		kubeClient:                 kubeClientset,
+		cloudProviderClient:        cloudProviderClient,
+		cloudPrivateIPConfigLister: cloudPrivateIPConfigInformer.Lister(),
+		ctx:                        controllerContext,
 	}
 
 	controller := controller.NewCloudNetworkConfigController(
@@ -109,7 +116,21 @@ func (n *NodeController) SyncHandler(key string) error {
 			cloudproviderapi.TaintExternalCloudProvider)
 		return nil
 	}
-	nodeEgressIPConfigs, err := n.cloudProviderClient.GetNodeEgressIPConfiguration(node)
+	cloudPrivateIPConfigs, err := n.cloudPrivateIPConfigLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("error listing cloud private ip config, err: %v", err)
+	}
+	// Filter out cloudPrivateIPConfigs assigned to node (key) and write the entry
+	// into same slice starting from index 0, finally chop off unwanted entries
+	// when passing it into GetNodeEgressIPConfiguration.
+	index := 0
+	for _, cloudPrivateIPConfig := range cloudPrivateIPConfigs {
+		if isAssignedCloudPrivateIPConfigOnNode(cloudPrivateIPConfig, key) {
+			cloudPrivateIPConfigs[index] = cloudPrivateIPConfig
+			index++
+		}
+	}
+	nodeEgressIPConfigs, err := n.cloudProviderClient.GetNodeEgressIPConfiguration(node, cloudPrivateIPConfigs[:index])
 	if err != nil {
 		return fmt.Errorf("error retrieving the private IP configuration for node: %s, err: %v", node.Name, err)
 	}
@@ -153,6 +174,18 @@ func (n *NodeController) generateAnnotation(nodeEgressIPConfigs []*cloudprovider
 func taintKeyExists(taints []v1.Taint, taintKeyToMatch string) bool {
 	for _, taint := range taints {
 		if taint.Key == taintKeyToMatch {
+			return true
+		}
+	}
+	return false
+}
+
+func isAssignedCloudPrivateIPConfigOnNode(cloudPrivateIPConfig *cloudnetworkv1.CloudPrivateIPConfig, nodeName string) bool {
+	if cloudPrivateIPConfig.Status.Node != nodeName {
+		return false
+	}
+	for _, condition := range cloudPrivateIPConfig.Status.Conditions {
+		if condition.Type == string(cloudnetworkv1.Assigned) && condition.Status == metav1.ConditionTrue {
 			return true
 		}
 	}
