@@ -11,6 +11,7 @@ import (
 	cloudnetworkv1 "github.com/openshift/api/cloudnetwork/v1"
 	fakecloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
+	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
 	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
 	controller "github.com/openshift/cloud-network-config-controller/pkg/controller"
 	corev1 "k8s.io/api/core/v1"
@@ -1086,7 +1087,10 @@ func TestCloudPrivateIPConfigNameToIP(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		actualIP := cloudPrivateIPConfigNameToIP(test.name)
+		actualIP, _, err := cloudprivateipconfig.NameToIP(test.name)
+		if err != nil {
+			t.Fatalf("CloudPrivateIPConfigName expected no error, but got err: %v", err)
+		}
 		if !test.exectedIP.Equal(actualIP) {
 			t.Fatalf("Expected CloudPrivateIPConfigName %s to match IP: %v, but got: %v", test.name, test.exectedIP, actualIP)
 		}

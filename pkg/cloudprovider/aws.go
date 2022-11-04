@@ -13,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	v1 "github.com/openshift/api/cloudnetwork/v1"
+	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -177,7 +179,7 @@ func (a *AWS) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	}
 }
 
-func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error) {
+func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
 	instance, err := a.getInstance(node)
 	if err != nil {
 		return nil, err
@@ -205,7 +207,10 @@ func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPCo
 	if v6Subnet != nil {
 		config.IFAddr.IPv6 = v6Subnet.String()
 	}
-	capV4, capV6 := a.getCapacity(instanceV4Capacity, instanceV6Capacity, networkInterface)
+	capV4, capV6, err := a.getCapacity(instanceV4Capacity, instanceV6Capacity, networkInterface, cloudPrivateIPConfigs)
+	if err != nil {
+		return nil, err
+	}
 	config.Capacity = capacity{
 		IPv4: capV4,
 		IPv6: capV6,
@@ -289,7 +294,7 @@ func (a *AWS) getSubnet(networkInterface *ec2.InstanceNetworkInterface) (*net.IP
 // https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#AvailableIpPerENI
 // Hence we need to retrieve that and then subtract the amount already assigned
 // by default.
-func (a *AWS) getCapacity(instanceV4Capacity, instanceV6Capacity int, networkInterface *ec2.InstanceNetworkInterface) (int, int) {
+func (a *AWS) getCapacity(instanceV4Capacity, instanceV6Capacity int, networkInterface *ec2.InstanceNetworkInterface, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) (int, int, error) {
 	currentIPv4Usage, currentIPv6Usage := 0, 0
 	for _, assignedIPv6 := range networkInterface.Ipv6Addresses {
 		if assignedIP := net.ParseIP(*assignedIPv6.Ipv6Address); assignedIP != nil {
@@ -301,7 +306,18 @@ func (a *AWS) getCapacity(instanceV4Capacity, instanceV6Capacity int, networkInt
 			currentIPv4Usage++
 		}
 	}
-	return instanceV4Capacity - currentIPv4Usage, instanceV6Capacity - currentIPv6Usage
+	for _, cloudPrivateIPConfig := range cloudPrivateIPConfigs {
+		_, ipFamily, err := cloudprivateipconfig.NameToIP(cloudPrivateIPConfig.Name)
+		if err != nil {
+			return 0, 0, err
+		}
+		if ipFamily == cloudprivateipconfig.IPv4 {
+			instanceV4Capacity++
+		} else if ipFamily == cloudprivateipconfig.IPv6 {
+			instanceV6Capacity++
+		}
+	}
+	return instanceV4Capacity - currentIPv4Usage, instanceV6Capacity - currentIPv6Usage, nil
 }
 
 func (a *AWS) getNetworkInterfaces(instance *ec2.Instance) ([]*ec2.InstanceNetworkInterface, error) {

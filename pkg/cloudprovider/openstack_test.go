@@ -18,7 +18,9 @@ import (
 	neutronsubnets "github.com/gophercloud/gophercloud/openstack/networking/v2/subnets"
 	th "github.com/gophercloud/gophercloud/testhelper"
 	testclient "github.com/gophercloud/gophercloud/testhelper/client"
+	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
@@ -603,7 +605,7 @@ func TestOpenStackPlugin(t *testing.T) {
 	n1 := &corev1.Node{}
 	n1.Name = "node1"
 	n1.Spec.ProviderID = "openstack:///9e5476bd-a4ec-4653-93d6-72c93aa682ba"
-	_, err := o.GetNodeEgressIPConfiguration(n1)
+	_, err := o.GetNodeEgressIPConfiguration(n1, nil)
 	if err == nil {
 		t.Fatal("TestOpenStackPlugin: Testing node1, this should fail, but returned a nil error instead")
 	}
@@ -615,7 +617,7 @@ func TestOpenStackPlugin(t *testing.T) {
 	n2 := &corev1.Node{}
 	n2.Name = "node2"
 	n2.Spec.ProviderID = "openstack:///b5d5889f-76f9-46b1-8af9-bfdf81e96616"
-	nodeEgressIPConfiguration, err := o.GetNodeEgressIPConfiguration(n2)
+	nodeEgressIPConfiguration, err := o.GetNodeEgressIPConfiguration(n2, nil)
 	if err != nil {
 		t.Fatalf("TestOpenStackPlugin: Could not generate NodeEgressIPConfiguration, err: %q", err)
 	}
@@ -716,9 +718,10 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 	}
 
 	tcs := []struct {
-		port               neutronports.Port
-		nodeEgressIPConfig NodeEgressIPConfiguration
-		errString          string
+		port                  neutronports.Port
+		nodeEgressIPConfig    NodeEgressIPConfiguration
+		cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig
+		errString             string
 	}{
 		{
 			port: portMap["9ab428d4-58f8-42d7-9672-90c3f5641f83"],
@@ -742,9 +745,14 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IP: openstackMaxCapacity - 2, // 2 allowed_address_pairs configured on the port.
+					IP: openstackMaxCapacity + 3 - 2, // excluding 2 allowed_address_pairs configured on the port.
 				},
 			},
+			// Configure cloudPrivateIPConfigs with 3 ips are within neutron subnet, 1 ip outside neutron subnet.
+			cloudPrivateIPConfigs: []*v1.CloudPrivateIPConfig{{ObjectMeta: metav1.ObjectMeta{
+				Name: "192.0.2.10"}}, {ObjectMeta: metav1.ObjectMeta{Name: "2000..1"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "2000..2"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "10.10.10.1"}}},
 		},
 		{
 			port:      portMap["aafecceb-d986-42b6-8ea7-449c7cacb7d9"],
@@ -757,7 +765,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 	}
 
 	for i, tc := range tcs {
-		nodeEgressIPConfig, err := o.getNeutronPortNodeEgressIPConfiguration(tc.port)
+		nodeEgressIPConfig, err := o.getNeutronPortNodeEgressIPConfiguration(tc.port, tc.cloudPrivateIPConfigs)
 		if err != nil {
 			if !strings.Contains(err.Error(), tc.errString) {
 				t.Fatalf("TestGetNeutronPortNodeEgressIPConfiguration(%d): Received unexpected error, err: %q, expected: %q", i, err, tc.errString)
