@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -54,10 +55,8 @@ type CloudProviderIntf interface {
 	// specifically that: the IP capacity can be either hard-coded and global
 	// for all instance types and IP families (GCP, Azure) or variable per
 	// instance and IP family (AWS), also: the interface is either keyed by name
-	// (GCP) or ID (Azure, AWS). Note: this function should only be called when
-	// no egress IPs have been added to the node, it will return an incorrect
-	// "egress IP capacity" otherwise
-	GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error)
+	// (GCP) or ID (Azure, AWS).
+	GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error)
 }
 
 // CloudProviderConfig is all the command-line options needed to initialize

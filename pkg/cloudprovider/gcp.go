@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	v1 "github.com/openshift/api/cloudnetwork/v1"
 	google "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
@@ -128,7 +129,7 @@ func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	return g.waitForCompletion(project, zone, operation.Name)
 }
 
-func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error) {
+func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
 	project, _, instance, err := g.getInstance(node)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving instance associated with node, err: %v", err)
@@ -155,7 +156,7 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPCo
 			config.IFAddr.IPv6 = v6Subnet.String()
 		}
 		config.Capacity = capacity{
-			IP: g.getCapacity(networkInterface),
+			IP: g.getCapacity(networkInterface, len(cloudPrivateIPConfigs)),
 		}
 		return []*NodeEgressIPConfiguration{config}, nil //nolint:staticcheck
 	}
@@ -204,7 +205,7 @@ func (g *GCP) getSubnet(project string, networkInterface *google.NetworkInterfac
 
 // Note: there is also a global "alias IP per VPC quota", but OpenShift clusters on
 // GCP seem to have that value defined to 15,000. So we can skip that.
-func (g *GCP) getCapacity(networkInterface *google.NetworkInterface) int {
+func (g *GCP) getCapacity(networkInterface *google.NetworkInterface, cloudPrivateIPsCount int) int {
 	currentIPv4Usage := 0
 	currentIPv6Usage := 0
 	for _, aliasIPRange := range networkInterface.AliasIpRanges {
@@ -222,7 +223,7 @@ func (g *GCP) getCapacity(networkInterface *google.NetworkInterface) int {
 			}
 		}
 	}
-	return defaultGCPPrivateIPCapacity - currentIPv4Usage - currentIPv6Usage
+	return defaultGCPPrivateIPCapacity + cloudPrivateIPsCount - currentIPv4Usage - currentIPv6Usage
 }
 
 // getInstance retrieves the GCP instance referrred by the Node object.

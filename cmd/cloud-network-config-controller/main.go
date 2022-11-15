@@ -116,6 +116,7 @@ func main() {
 					kubeClient,
 					cloudProviderClient,
 					kubeInformerFactory.Core().V1().Nodes(),
+					cloudNetworkInformerFactory.Cloud().V1().CloudPrivateIPConfigs(),
 				)
 				secretController := secretcontroller.NewSecretController(
 					ctx,
