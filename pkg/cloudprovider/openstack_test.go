@@ -601,22 +601,20 @@ func TestOpenStackPlugin(t *testing.T) {
 		neutronClient: testclient.ServiceClient(),
 	}
 
-	// First, get EgressIP information of a node that has invalid port attachments.
-	n1 := &corev1.Node{}
-	n1.Name = "node1"
-	n1.Spec.ProviderID = "openstack:///9e5476bd-a4ec-4653-93d6-72c93aa682ba"
-	_, err := o.GetNodeEgressIPConfiguration(n1, nil)
-	if err == nil {
-		t.Fatal("TestOpenStackPlugin: Testing node1, this should fail, but returned a nil error instead")
-	}
-	if !strings.Contains(err.Error(), "is attached more than once to node") {
-		t.Fatalf("TestOpenStackPlugin: Testing node1, this should fail with 'is attached more than once to node', but got another error instead, err: %q", err)
-	}
-
-	// Then, get EgressIP information of a node where everything is in order.
+	// Get EgressIP information of a node where everything is in order.
 	n2 := &corev1.Node{}
 	n2.Name = "node2"
 	n2.Spec.ProviderID = "openstack:///b5d5889f-76f9-46b1-8af9-bfdf81e96616"
+	n2.Status.Addresses = []corev1.NodeAddress{
+		{
+			Type:    corev1.NodeInternalIP,
+			Address: "192.0.2.10",
+		},
+		{
+			Type:    corev1.NodeInternalIP,
+			Address: "2000::10",
+		},
+	}
 	nodeEgressIPConfiguration, err := o.GetNodeEgressIPConfiguration(n2, nil)
 	if err != nil {
 		t.Fatalf("TestOpenStackPlugin: Could not generate NodeEgressIPConfiguration, err: %q", err)
@@ -627,16 +625,6 @@ func TestOpenStackPlugin(t *testing.T) {
 			IFAddr: ifAddr{
 				IPv4: "192.0.2.0/24",
 				IPv6: "2000::/64",
-			},
-			Capacity: capacity{
-				IP: openstackMaxCapacity,
-			},
-		},
-		{
-			Interface: "ed5351a4-08b5-4ac6-b9c9-bbbe557df381",
-			IFAddr: ifAddr{
-				IPv4: "192.0.3.0/24",
-				IPv6: "2001::/64",
 			},
 			Capacity: capacity{
 				IP: openstackMaxCapacity,
@@ -702,6 +690,233 @@ func TestOpenStackPlugin(t *testing.T) {
 	errString = "the requested IP for removal is not assigned"
 	if err == nil || err.Error() != errString {
 		t.Fatalf("TestOpenStackPlugin: Unexpected error, got '%q' but expected '%s'", err, errString)
+	}
+}
+
+func TestGetNodeEgressIPConfiguration(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+
+	HandleSubnetList(t)
+	HandlePortGetUpdateDelete(t, "")
+	HandlePortListAndCreation(t)
+	HandleServerGet(t)
+
+	o := OpenStack{
+		CloudProvider: CloudProvider{},
+		novaClient:    testclient.ServiceClient(),
+		neutronClient: testclient.ServiceClient(),
+	}
+
+	tcs := map[string]struct {
+		node                       *corev1.Node
+		expectedNodeEgressIPConfig []NodeEgressIPConfiguration
+		errString                  string
+	}{
+		"Invalid node": {
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "openstack:///9e5476bd-a4ec-4653-93d6-72c93aa682ba",
+				},
+			},
+			errString: "is attached more than once to node",
+		},
+		"Valid node 0": {
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node2",
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "openstack:///b5d5889f-76f9-46b1-8af9-bfdf81e96616",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "192.0.2.10",
+						},
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "2000::10",
+						},
+					},
+				},
+			},
+			expectedNodeEgressIPConfig: []NodeEgressIPConfiguration{
+				{
+					Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
+					IFAddr: ifAddr{
+						IPv4: "192.0.2.0/24",
+						IPv6: "2000::/64",
+					},
+					Capacity: capacity{
+						IP: openstackMaxCapacity,
+					},
+				},
+			},
+		},
+		"Valid node 1": {
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node2",
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "openstack:///b5d5889f-76f9-46b1-8af9-bfdf81e96616",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "192.0.3.10",
+						},
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "2001::10",
+						},
+					},
+				},
+			},
+			expectedNodeEgressIPConfig: []NodeEgressIPConfiguration{
+				{
+					Interface: "ed5351a4-08b5-4ac6-b9c9-bbbe557df381",
+					IFAddr: ifAddr{
+						IPv4: "192.0.3.0/24",
+						IPv6: "2001::/64",
+					},
+					Capacity: capacity{
+						IP: openstackMaxCapacity,
+					},
+				},
+			},
+		},
+		"Valid node 2": {
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node2",
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "openstack:///b5d5889f-76f9-46b1-8af9-bfdf81e96616",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "192.0.2.10",
+						},
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "2000::10",
+						},
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "192.0.3.10",
+						},
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "2001::10",
+						},
+					},
+				},
+			},
+			expectedNodeEgressIPConfig: []NodeEgressIPConfiguration{
+				{
+					Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
+					IFAddr: ifAddr{
+						IPv4: "192.0.2.0/24",
+						IPv6: "2000::/64",
+					},
+					Capacity: capacity{
+						IP: openstackMaxCapacity,
+					},
+				},
+			},
+		},
+		"Valid node 3 - undefined behavior": {
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node2",
+				},
+				Spec: corev1.NodeSpec{
+					ProviderID: "openstack:///b5d5889f-76f9-46b1-8af9-bfdf81e96616",
+				},
+				Status: corev1.NodeStatus{
+					Addresses: []corev1.NodeAddress{
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "192.0.2.10",
+						},
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "2001::10",
+						},
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "2000::10",
+						},
+						{
+							Type:    corev1.NodeInternalIP,
+							Address: "192.0.3.10",
+						},
+					},
+				},
+			},
+			expectedNodeEgressIPConfig: []NodeEgressIPConfiguration{
+				{
+					Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
+					IFAddr: ifAddr{
+						IPv4: "192.0.2.0/24",
+						IPv6: "2000::/64",
+					},
+					Capacity: capacity{
+						IP: openstackMaxCapacity,
+					},
+				},
+			},
+		},
+	}
+	for testName, tc := range tcs {
+		nodeEgressIPConfiguration, err := o.GetNodeEgressIPConfiguration(tc.node, nil)
+		if tc.errString != "" {
+			if err == nil {
+				t.Fatalf("TestGetNodeEgressIPConfiguration(%s): Expected to get an error message that contains %q "+
+					"but instead got no error", testName, tc.errString)
+			} else if !strings.Contains(err.Error(), tc.errString) {
+				t.Fatalf("TestGetNodeEgressIPConfiguration(%s): Expected to get an error message that contains %q "+
+					"but instead got no error", testName, tc.errString)
+			}
+			continue
+		}
+
+		if err != nil {
+			t.Fatalf("TestGetNodeEgressIPConfiguration(%s): Expected to get no error but instead got: %q",
+				testName, err)
+		}
+		if len(tc.expectedNodeEgressIPConfig) != len(nodeEgressIPConfiguration) {
+			// Resolve pointers so that this becomes human readable.
+			got := ""
+			for _, v := range nodeEgressIPConfiguration {
+				got = fmt.Sprintf("%s %v", got, *v)
+			}
+			t.Fatalf("TestGetNodeEgressIPConfiguration(%s): nodeEgressIPConfiguration does not match. Got %q, expected %q",
+				testName, got, tc.expectedNodeEgressIPConfig)
+		}
+		for _, config := range nodeEgressIPConfiguration {
+			matched := false
+			for _, expectedConfig := range tc.expectedNodeEgressIPConfig {
+				if reflect.DeepEqual(config, &expectedConfig) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				t.Fatalf("TestGetNodeEgressIPConfiguration(%s): nodeEgressIPConfiguration does not match. "+
+					"Config '%v' not found, expected '%v'",
+					testName, config, tc.expectedNodeEgressIPConfig)
+			}
+		}
 	}
 }
 
