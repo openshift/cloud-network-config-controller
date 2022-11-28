@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -76,7 +75,7 @@ func (o *OpenStack) initCredentials() error {
 	// Read the clouds.yaml file.
 	// That information is stored in secret cloud-credentials.
 	clientConfigFile := filepath.Join(o.cfg.CredentialDir, "clouds.yaml")
-	content, err := ioutil.ReadFile(clientConfigFile)
+	content, err := os.ReadFile(clientConfigFile)
 	if err != nil {
 		return fmt.Errorf("could read file %s, err: %q", clientConfigFile, err)
 	}
@@ -118,7 +117,7 @@ func (o *OpenStack) initCredentials() error {
 	// Read CA information - needed for self-signed certificates.
 	// That information is stored in ConfigMap kube-cloud-config.
 	caBundle := filepath.Join(o.cfg.ConfigDir, "ca-bundle.pem")
-	userCACert, err := ioutil.ReadFile(caBundle)
+	userCACert, err := os.ReadFile(caBundle)
 	if err == nil && string(userCACert) != "" {
 		klog.Infof("Custom CA bundle found at location '%s' - reading certificate information", caBundle)
 		certPool, err := x509.SystemCertPool()
@@ -171,8 +170,10 @@ func (o *OpenStack) initCredentials() error {
 // Throw an AlreadyExistingIPError if the IP provided is already associated with the
 // node, it's up to the caller to decide what to do with that.
 // NOTE: For OpenStack, this is a 2 step operation which is not atomic:
-//   a) Reserve a neutron port.
-//   b) Add the IP address to the allowed_address_pairs field.
+//
+//	a) Reserve a neutron port.
+//	b) Add the IP address to the allowed_address_pairs field.
+//
 // If step b) fails, then we will try to undo step a). However, if this undo fails,
 // then we will be in a situation where the user or an upper layer will have to call
 // ReleasePrivateIP to get out of this situation.
@@ -438,16 +439,17 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 }
 
 // getNeutronPortNodeEgressIPConfiguration renders the NeutronPortNodeEgressIPConfiguration for a given port.
-// * The interface is keyed by a neutron UUID
-// * If multiple IPv4 repectively multiple IPv6 subnets are attached to the same port, throw an error.
-// * The IP capacity is per port, per IP address family. It's ceiling is limited by the maximum of:
-//   a) The size of the subnet.
-//   b) An arbitrarily selected ceiling of `openstackMaxCapacity`.
-//   The number of unique IP addresses in allowed_address_pair and fixed_ips is subtracted from that ceiling.
-//   Keep in mind that the subnet size is an upper limit for the subnet, the port quota an upper limit for the
-//   project but that IP capacity is a per port value.
-//   The definition of this field does unfortunately not play very well with the way how neutron operates as there
-//   is no such thing as a per port quota or limit.
+//   - The interface is keyed by a neutron UUID
+//   - If multiple IPv4 repectively multiple IPv6 subnets are attached to the same port, throw an error.
+//   - The IP capacity is per port, per IP address family. It's ceiling is limited by the maximum of:
+//     a) The size of the subnet.
+//     b) An arbitrarily selected ceiling of `openstackMaxCapacity`.
+//     The number of unique IP addresses in allowed_address_pair and fixed_ips is subtracted from that ceiling.
+//     Keep in mind that the subnet size is an upper limit for the subnet, the port quota an upper limit for the
+//     project but that IP capacity is a per port value.
+//     The definition of this field does unfortunately not play very well with the way how neutron operates as there
+//     is no such thing as a per port quota or limit.
+//
 // TODO: How to determine the primary interface of an instance if multiple interfaces are attached?
 // TODO: As a solution, we currently report the EgressIP configuration for every attached interface, but other plugins
 // do not do this. Is the upper layer compatible with that?

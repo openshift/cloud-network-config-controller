@@ -270,7 +270,9 @@ func (a *Azure) getCapacity(networkInterface network.Interface, cloudPrivateIPsC
 
 // This is what the node's providerID looks like on Azure
 // spec:
-//   providerID: azure:///subscriptions/ee2e2172-e246-4d4b-a72a-f62fbf924238/resourceGroups/ovn-qgwkn-rg/providers/Microsoft.Compute/virtualMachines/ovn-qgwkn-worker-canadacentral1-bskbf
+//
+//	providerID: azure:///subscriptions/ee2e2172-e246-4d4b-a72a-f62fbf924238/resourceGroups/ovn-qgwkn-rg/providers/Microsoft.Compute/virtualMachines/ovn-qgwkn-worker-canadacentral1-bskbf
+//
 // getInstance also validates that the instance has a (or several) NICs
 func (a *Azure) getInstance(node *corev1.Node) (*compute.VirtualMachine, error) {
 	providerData := strings.Split(node.Spec.ProviderID, "/")
@@ -342,7 +344,8 @@ func (a *Azure) getNetworkInterface(id string) (network.Interface, error) {
 }
 
 // This is what the subnet ID looks like on Azure:
-// 	ID: "/subscriptions/d38f1e38-4bed-438e-b227-833f997adf6a/resourceGroups/ci-ln-wzc83kk-002ac-qcghn-rg/providers/Microsoft.Network/virtualNetworks/ci-ln-wzc83kk-002ac-qcghn-vnet/subnets/ci-ln-wzc83kk-002ac-qcghn-worker-subnet"
+//
+//	ID: "/subscriptions/d38f1e38-4bed-438e-b227-833f997adf6a/resourceGroups/ci-ln-wzc83kk-002ac-qcghn-rg/providers/Microsoft.Network/virtualNetworks/ci-ln-wzc83kk-002ac-qcghn-vnet/subnets/ci-ln-wzc83kk-002ac-qcghn-worker-subnet"
 func (a *Azure) getNetworkResourceGroupAndSubnetAndNetnames(subnetID string) (string, string, string, error) {
 	providerData := strings.Split(subnetID, "/")
 	if len(providerData) != 11 {

@@ -251,10 +251,11 @@ func (g *GCP) getNetworkInterfaces(instance *google.Instance) ([]*google.Network
 	return instance.NetworkInterfaces, nil
 }
 
-//  This is what the node's providerID looks like on GCP
-// 	spec:
-//   providerID: gce://openshift-gce-devel-ci/us-east1-b/ci-ln-pvr3lyb-f76d1-6w8mm-master-0
-//  i.e: projectID/zone/instanceName
+//	 This is what the node's providerID looks like on GCP
+//		spec:
+//	  providerID: gce://openshift-gce-devel-ci/us-east1-b/ci-ln-pvr3lyb-f76d1-6w8mm-master-0
+//	 i.e: projectID/zone/instanceName
+//
 // split out and return these components
 func splitGCPNode(node *corev1.Node) (project, zone, instance string, err error) {
 	u, err := url.Parse(node.Spec.ProviderID)
