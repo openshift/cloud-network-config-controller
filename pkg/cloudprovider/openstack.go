@@ -384,12 +384,7 @@ func (o *OpenStack) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 
 // GetNodeEgressIPConfiguration retrieves the egress IP configuration for
 // the node, following the convention the cloud uses. This means
-// specifically for OpenStack:
-// * The IP capacity is limited by the size of the subnet as well as the current
-// neutron quotas.
-// * The interface is keyed by a neutron UUID
-// This function should only be called when no egress IPs have been added to the node,
-// it will return an incorrect "egress IP capacity" otherwise.
+// specifically for OpenStack that the interface is keyed by the port's neutron UUID.
 func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
 	if node == nil {
 		return nil, fmt.Errorf("invalid nil pointer provided for node when trying to get node EgressIP configuration")
@@ -439,21 +434,12 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 }
 
 // getNeutronPortNodeEgressIPConfiguration renders the NeutronPortNodeEgressIPConfiguration for a given port.
-//   - The interface is keyed by a neutron UUID
-//   - If multiple IPv4 repectively multiple IPv6 subnets are attached to the same port, throw an error.
-//   - The IP capacity is per port, per IP address family. It's ceiling is limited by the maximum of:
-//     a) The size of the subnet.
-//     b) An arbitrarily selected ceiling of `openstackMaxCapacity`.
-//     The number of unique IP addresses in allowed_address_pair and fixed_ips is subtracted from that ceiling.
-//     Keep in mind that the subnet size is an upper limit for the subnet, the port quota an upper limit for the
-//     project but that IP capacity is a per port value.
-//     The definition of this field does unfortunately not play very well with the way how neutron operates as there
-//     is no such thing as a per port quota or limit.
-//
-// TODO: How to determine the primary interface of an instance if multiple interfaces are attached?
-// TODO: As a solution, we currently report the EgressIP configuration for every attached interface, but other plugins
-// do not do this. Is the upper layer compatible with that?
-// TODO: How to determine the primary AF?
+// The interface is keyed by a neutron UUID.
+// If multiple IPv4 repectively multiple IPv6 subnets are attached to the same port, throw an error.
+// The IP capacity is per port. The definition of this field does unfortunately not play very well with the way how
+// neutron operates as there is no such thing as a per port quota or limit. Therefore we set a ceiling of
+// `openstackMaxCapacity`. The number of unique IP addresses in allowed_address_pair and fixed_ips is subtracted from
+// that ceiling.
 func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) (*NodeEgressIPConfiguration, error) {
 	var ipv4, ipv6 string
 	var err error
@@ -622,7 +608,7 @@ func (o *OpenStack) getNeutronPortWithIPAddressAndMachineID(s neutronsubnets.Sub
 // allowIPAddressOnNeutronPort adds the specified IP address to the port's allowed_address_pairs.
 func (o *OpenStack) allowIPAddressOnNeutronPort(portID string, ip net.IP) error {
 	// Needed due to neutron bug  https://bugzilla.redhat.com/show_bug.cgi?id=2119199.
-	klog.Info("Getting port lock for portID %s and IP %s", portID, ip.String())
+	klog.Infof("Getting port lock for portID %s and IP %s", portID, ip.String())
 	portLock := o.getLockForPort(portID)
 	portLock.Lock()
 	defer portLock.Unlock()
@@ -676,7 +662,7 @@ func (o *OpenStack) allowIPAddressOnNeutronPort(portID string, ip net.IP) error 
 // unallowIPAddressOnNeutronPort removes the specified IP address from the port's allowed_address_pairs.
 func (o *OpenStack) unallowIPAddressOnNeutronPort(portID string, ip net.IP) error {
 	// Needed due to neutron bug  https://bugzilla.redhat.com/show_bug.cgi?id=2119199.
-	klog.Info("Getting port lock for portID %s and IP %s", portID, ip.String())
+	klog.Infof("Getting port lock for portID %s and IP %s", portID, ip.String())
 	portLock := o.getLockForPort(portID)
 	portLock.Lock()
 	defer portLock.Unlock()
