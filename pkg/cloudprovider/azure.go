@@ -99,7 +99,7 @@ func (a *Azure) initCredentials() error {
 
 func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	ipc := ip.String()
-	klog.Info("acquiring node lock for assigning ip address, node: %s, ip: %s", node.Name, ipc)
+	klog.Infof("Acquiring node lock for assigning ip address, node: %s, ip: %s", node.Name, ipc)
 	nodeLock := a.getNodeLock(node.Name)
 	nodeLock.Lock()
 	defer nodeLock.Unlock()
@@ -140,7 +140,7 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 }
 
 func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
-	klog.Info("acquiring node lock for releasing ip address, node: %s, ip: %s", node.Name, ip.String())
+	klog.Infof("Acquiring node lock for releasing ip address, node: %s, ip: %s", node.Name, ip.String())
 	nodeLock := a.getNodeLock(node.Name)
 	nodeLock.Lock()
 	defer nodeLock.Unlock()
