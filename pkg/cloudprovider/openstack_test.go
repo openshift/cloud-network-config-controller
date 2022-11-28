@@ -3,7 +3,7 @@ package cloudprovider
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"reflect"
@@ -405,7 +405,7 @@ func portListHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
 }
 
 func portCreationHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading from body of POST request to /ports, err %q", err)
 	}
@@ -535,7 +535,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 
 			// PUT
 			th.TestHeader(t, r, "Content-Type", "application/json")
-			body, err := ioutil.ReadAll(r.Body)
+			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Fatalf("Unexpected error when reading from body of POST request to /ports, err %q", err)
 			}

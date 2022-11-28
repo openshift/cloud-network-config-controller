@@ -149,8 +149,9 @@ func assertStateEquals(syncedState, expectedState []string) error {
 
 // TestSyncCloudPrivateIPConfig tests sync state for our CloudPrivateIPConfig
 // control loop. It does not test:
-//  - that the node specified is valid - that is handled by the admission controller
-//  - that the CloudPrivateIPConfig name is a valid IP - that is handled by OpenAPI
+//   - that the node specified is valid - that is handled by the admission controller
+//   - that the CloudPrivateIPConfig name is a valid IP - that is handled by OpenAPI
+//
 // Hence, all tests here are written with a valid spec. Moreover, this
 // controller neither deletes nor creates objects. Hence the only Kubernetes
 // action we need to verify is update, i.e: that the control loop updates the
