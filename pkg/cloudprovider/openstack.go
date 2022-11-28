@@ -390,8 +390,6 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 		return nil, fmt.Errorf("invalid nil pointer provided for node when trying to get node EgressIP configuration")
 	}
 
-	var configurations []*NodeEgressIPConfiguration
-
 	serverID, err := getNovaServerIDFromProviderID(node.Spec.ProviderID)
 	if err != nil {
 		return nil, err
@@ -401,18 +399,22 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 		return nil, err
 	}
 
-	// For each port, generate one entry in the slice of NodeEgressIPConfigurations.
-	// Add a sanity check: do not allow the same CIDR to be attached to 2 different ports,
-	// otherwise we don't know where the EgressIP should be attached to.
-	cidrs := make(map[string]struct{})
+	// For each port, generate one entry in a temporary slice of NodeEgressIPConfigurations (to be filtered further
+	// later).
+	var configurations []*NodeEgressIPConfiguration
 	for _, p := range serverPorts {
 		// Retrieve configuration for this port.
 		config, err := o.getNeutronPortNodeEgressIPConfiguration(p, cloudPrivateIPConfigs)
 		if err != nil {
 			return nil, err
 		}
+		configurations = append(configurations, config)
+	}
 
-		// Check for duplicate CIDR assignments.
+	// Sanity check: Check the entire slice for duplicate CIDR assignments. Do not allow the same CIDR to be attached
+	// to 2 different ports, otherwise we don't know where the EgressIP should be attached to.
+	cidrs := make(map[string]struct{})
+	for _, config := range configurations {
 		if config.IFAddr.IPv4 != "" {
 			if _, ok := cidrs[config.IFAddr.IPv4]; ok {
 				return nil, fmt.Errorf("IPv4 CIDR '%s' is attached more than once to node %s", config.IFAddr.IPv4, node.Name)
@@ -425,12 +427,35 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 			}
 			cidrs[config.IFAddr.IPv6] = struct{}{}
 		}
-
-		// Append configuration to list of configurations.
-		configurations = append(configurations, config)
 	}
 
-	return configurations, nil
+	// We only allow EgressIPs on the MachineNetwork (the first node internal address for each IP address family).
+	// Corner case: IPv4 InternalIP is on different interface than the IPv6 InternalIP. This should never happen in
+	// OpenShift. If it does, we simply return the first matching config regardless.
+	ipv4InternalIP, ipv6InternalIP := getNodeInternalAddrs(node)
+	for _, config := range configurations {
+		if config.IFAddr.IPv4 != "" {
+			_, ipv4Net, ipv4Err := net.ParseCIDR(config.IFAddr.IPv4)
+			if ipv4Err != nil {
+				klog.Errorf("failure parsing IPv4 CIDR %q, err: %q", config.IFAddr.IPv4, ipv4Err)
+			} else if ipv4Net.Contains(ipv4InternalIP) {
+				return []*NodeEgressIPConfiguration{config}, nil
+			}
+		}
+		if config.IFAddr.IPv6 != "" {
+			_, ipv6Net, ipv6Err := net.ParseCIDR(config.IFAddr.IPv6)
+			if ipv6Err != nil {
+				klog.Errorf("failure parsing IPv6 CIDR %q, err: %q", config.IFAddr.IPv6, ipv6Err)
+			} else if ipv6Net.Contains(ipv6InternalIP) {
+				return []*NodeEgressIPConfiguration{config}, nil
+			}
+		}
+		klog.Infof("Skipping interface config. Neither the IPv4 nor the IPv6 network contain the first InternalIP "+
+			" of the node. Interface config: %q, IPv4 InternalIP: %q, IPv6 InternalIP: %q",
+			config, ipv4InternalIP, ipv6InternalIP)
+	}
+
+	return nil, fmt.Errorf("no suitable interface configurations found")
 }
 
 // getNeutronPortNodeEgressIPConfiguration renders the NeutronPortNodeEgressIPConfiguration for a given port.
@@ -827,4 +852,25 @@ func (o *OpenStack) getLockForPort(portID string) *sync.Mutex {
 		o.portLockMap[portID] = &sync.Mutex{}
 	}
 	return o.portLockMap[portID]
+}
+
+// getNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
+// for the node. On certain cloud providers the egress IP will be added to
+// the list of node IPs as an InternalIP address. Node IPs are ordered,
+// meaning the egress IP will never be first in this list.
+// Copied from :
+// https://github.com/ovn-org/ovn-kubernetes/blob/2cceeebd4f66ee8dd9e683551b883e549b5cd7da/go-controller/pkg/ovn/egressip.go#L2580
+func getNodeInternalAddrs(node *corev1.Node) (net.IP, net.IP) {
+	var v4Addr, v6Addr net.IP
+	for _, nodeAddr := range node.Status.Addresses {
+		if nodeAddr.Type == corev1.NodeInternalIP {
+			ip := net.ParseIP(nodeAddr.Address)
+			if !utilnet.IsIPv6(ip) && v4Addr == nil {
+				v4Addr = ip
+			} else if utilnet.IsIPv6(ip) && v6Addr == nil {
+				v6Addr = ip
+			}
+		}
+	}
+	return v4Addr, v6Addr
 }
