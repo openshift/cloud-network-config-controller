@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -95,10 +95,10 @@ type capacity struct {
 //  important for performing egress IP assignments by the network plugin.
 //  Specifically this is:
 
-//  - Interface - ID / Name, depending on the cloud's convention
-//  - IP address capacity for each node, where the capacity is either IP family
-//    agnostic or not.
-//  - Subnet information for the first network interface, IP family specific
+//   - Interface - ID / Name, depending on the cloud's convention
+//   - IP address capacity for each node, where the capacity is either IP family
+//     agnostic or not.
+//   - Subnet information for the first network interface, IP family specific
 type NodeEgressIPConfiguration struct {
 	Interface string   `json:"interface"`
 	IFAddr    ifAddr   `json:"ifaddr"`
@@ -145,7 +145,7 @@ func NewCloudProviderClient(cfg CloudProviderConfig) (CloudProviderIntf, error) 
 }
 
 func (c *CloudProvider) readSecretData(secret string) (string, error) {
-	data, err := ioutil.ReadFile(filepath.Join(c.cfg.CredentialDir, secret))
+	data, err := os.ReadFile(filepath.Join(c.cfg.CredentialDir, secret))
 	if err != nil {
 		return "", fmt.Errorf("unable to read secret data, err: %v", err)
 	}
