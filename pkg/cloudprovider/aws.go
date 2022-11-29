@@ -379,10 +379,12 @@ func (a *AWS) getInstance(node *corev1.Node) (*ec2.Instance, error) {
 // But it might also be passed in as aws://<zone>/<instanceID> and the zone might
 // be omitted.
 // This is what the node's providerID can look like on AWS (examples):
-//    spec:
-//      providerID: aws:///us-west-2a/i-008447f243eead273
-//      providerID: aws://us-west-2a/i-008447f243eead273
-//      providerID: aws:///i-008447f243eead273
+//
+//	spec:
+//	  providerID: aws:///us-west-2a/i-008447f243eead273
+//	  providerID: aws://us-west-2a/i-008447f243eead273
+//	  providerID: aws:///i-008447f243eead273
+//
 // see https://github.com/kubernetes/cloud-provider-aws/blob/5f394ba297bf280ceb3edfc38922630b4bd83f46/pkg/providers/v2/instances.go#L254
 func getInstanceIdFromProviderId(providerId string) (string, error) {
 	// after trimming 'aws://', the remainder will be in one of the following formats:
