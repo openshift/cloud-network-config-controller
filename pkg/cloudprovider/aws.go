@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -80,41 +81,38 @@ func (a *AWS) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	// order AWS specifies.
 	networkInterface := networkInterfaces[0]
 	addIP := ip.String()
-	keepIPs := []*string{}
 	if utilnet.IsIPv6(ip) {
 		for _, assignedIPv6 := range networkInterface.Ipv6Addresses {
 			if assignedIP := net.ParseIP(*assignedIPv6.Ipv6Address); assignedIP != nil && assignedIP.Equal(ip) {
 				return AlreadyExistingIPError
 			}
-			keepIPs = append(keepIPs, assignedIPv6.Ipv6Address)
 		}
-		keepIPs = append(keepIPs, &addIP)
 		input := ec2.AssignIpv6AddressesInput{
 			NetworkInterfaceId: networkInterface.NetworkInterfaceId,
-			Ipv6Addresses:      keepIPs,
+			Ipv6Addresses:      []*string{&addIP},
 		}
 		_, err = a.client.AssignIpv6Addresses(&input)
 		if err != nil {
+			klog.Errorf("error: %s, tried to assign IP '%s' to interface: %s.", err, addIP, *networkInterface)
 			return err
 		}
-		return a.waitForCompletion(node, awsapi.StringValueSlice(keepIPs), false)
+		return a.waitForCompletion(node, []string{addIP}, false)
 	} else {
 		for _, assignedIPv4 := range networkInterface.PrivateIpAddresses {
 			if assignedIP := net.ParseIP(*assignedIPv4.PrivateIpAddress); assignedIP != nil && assignedIP.Equal(ip) {
 				return AlreadyExistingIPError
 			}
-			keepIPs = append(keepIPs, assignedIPv4.PrivateIpAddress)
 		}
-		keepIPs = append(keepIPs, &addIP)
 		inputV4 := ec2.AssignPrivateIpAddressesInput{
 			NetworkInterfaceId: networkInterface.NetworkInterfaceId,
-			PrivateIpAddresses: keepIPs,
+			PrivateIpAddresses: []*string{&addIP},
 		}
 		_, err = a.client.AssignPrivateIpAddresses(&inputV4)
 		if err != nil {
+			klog.Errorf("error: %s, tried to assign IP '%s' to interface: %s.", err, addIP, *networkInterface)
 			return err
 		}
-		return a.waitForCompletion(node, awsapi.StringValueSlice(keepIPs), false)
+		return a.waitForCompletion(node, []string{addIP}, false)
 	}
 }
 
