@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"path/filepath"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -122,6 +123,7 @@ func NewCloudProviderClient(cfg CloudProviderConfig) (CloudProviderIntf, error) 
 	case PlatformTypeAzure:
 		cloudProviderIntf = &Azure{
 			CloudProvider: cp,
+			nodeLockMap:   make(map[string]*sync.Mutex),
 		}
 	case PlatformTypeAWS:
 		cloudProviderIntf = &AWS{
