@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -37,7 +38,6 @@ const (
 	openstackCloudName      = "openstack"
 	openstackProviderPrefix = "openstack:///"
 	egressIPTag             = "OpenShiftEgressIP"
-	novaDeviceOwner         = "compute:nova"
 
 	// NOTE: Capacity is defined on a per interface basis as:
 	// - IP address capacity for each node, where the capacity is either IP family
@@ -62,6 +62,8 @@ type OpenStack struct {
 	portLockMapMutex sync.Mutex
 	portLockMap      map[string]*sync.Mutex
 }
+
+var novaDeviceOwnerRegex = regexp.MustCompile("^compute:.*")
 
 // initCredentials initializes the cloud API credentials by reading the
 // secret data which has been mounted in cloudProviderSecretLocation. The
@@ -790,8 +792,7 @@ func (o *OpenStack) listNovaServerPorts(serverID string) ([]neutronports.Port, e
 	}
 
 	portListOpts := neutronports.ListOpts{
-		DeviceOwner: novaDeviceOwner,
-		DeviceID:    serverID,
+		DeviceID: serverID,
 	}
 
 	pager := neutronports.List(o.neutronClient, portListOpts)
@@ -800,7 +801,11 @@ func (o *OpenStack) listNovaServerPorts(serverID string) ([]neutronports.Port, e
 		if err != nil {
 			return false, err
 		}
-		serverPorts = append(serverPorts, portList...)
+		for _, port := range portList {
+			if novaDeviceOwnerRegex.Match([]byte(port.DeviceOwner)) {
+				serverPorts = append(serverPorts, port)
+			}
+		}
 		return true, nil
 	})
 	if err != nil {

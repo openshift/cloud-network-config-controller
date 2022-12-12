@@ -24,6 +24,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
+const (
+	novaDeviceOwner = "compute:nova"
+)
+
 var serverMap = map[string]novaservers.Server{
 	"9e5476bd-a4ec-4653-93d6-72c93aa682ba": {
 		ID:   "9e5476bd-a4ec-4653-93d6-72c93aa682ba",
@@ -162,6 +166,31 @@ var portMap = map[string]neutronports.Port{
 				IPAddress: "192.168.125.11",
 			},
 		},
+	},
+	"84da9456-8a1d-4d3f-9e15-821e29b5e7c8": {
+		ID:        "84da9456-8a1d-4d3f-9e15-821e29b5e7c8",
+		NetworkID: "57d1274f-4717-43f1-88ec-0944546a14ef",
+		Name:      "multi-az-port",
+		FixedIPs: []neutronports.IP{
+			{
+				SubnetID:  "49895d6d-6972-4198-8afa-ada96e1daaef",
+				IPAddress: "192.0.2.10",
+			},
+			{
+				SubnetID:  "de0cda14-6ac6-4439-bc94-da0a27938b7b",
+				IPAddress: "2000::10",
+			},
+		},
+		AllowedAddressPairs: []neutronports.AddressPair{
+			{
+				IPAddress: "192.0.2.1",
+			},
+			{
+				IPAddress: "192.0.2.2",
+			},
+		},
+		DeviceID:    "50b412c1-d659-424e-8e29-5a5e5a6b5c45",
+		DeviceOwner: "compute:AZhci-2",
 	},
 }
 
@@ -1397,10 +1426,17 @@ func TestListNovaServerPorts(t *testing.T) {
 		portIDs    []string
 		errString  string
 	}{
+		// Test normal port.
 		{
 			instanceID: "9e5476bd-a4ec-4653-93d6-72c93aa682ba",
 			portIDs:    []string{"9ab428d4-58f8-42d7-9672-90c3f5641f83", "eec4c521-4288-4d54-939a-1ea32cc35c37"},
 		},
+		// Test multi-AZ.
+		{
+			instanceID: "50b412c1-d659-424e-8e29-5a5e5a6b5c45",
+			portIDs:    []string{"84da9456-8a1d-4d3f-9e15-821e29b5e7c8"},
+		},
+		// Test non-existing device ID.
 		{
 			instanceID: "9e5476bd-a4ec-4653-93d6-72c93aa682bc",
 			portIDs:    []string{},
