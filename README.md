@@ -38,7 +38,7 @@ colons replaced by dots, ex: `fc00:f853:ccd:e793::54` ->
 controller for IPv6 assignments must thus be capable of performing a
 bi-directional conversion to and from that format.
 
-Any assignment of an IP adress should only be considered successful when
+Any assignment of an IP address should only be considered successful when
 `.spec.node == .status.node` and `.status.conditions[0].status == True`, this
 applies to creation / updates of CRs.
 
@@ -46,10 +46,10 @@ This controller utilizes a finalizer which it sets on any CR which is created.
 The reason for doing so is to prevent an instance from being removed from the
 API until this controller has reacted, i.e: making sure that even if a delete is
 performed while our controller is not running: nothing actually gets deleted and
-we don't loose out on the event.
+we don't lose out on the event.
 
-The control loop for this controller perform atomic add/deletes. This is to say
-that for an update there will be two syncs performed and two updates occuring:
+The control loop for this controller performs atomic add/deletes. This is to say
+that for an update there will be two syncs performed and two updates occurring:
 one removal of the IP address from the current node, upon which the CR is
 updated, and then a second add to the new node, upon which the CR is updated
 again.  
@@ -237,7 +237,7 @@ limitations.
 ## Subnets
 
 An IP address can only be assigned to subnets which can host it. In the cloud
-subnets vary depending on the availability zone a instances is located in. This
+subnets vary depending on the availability zone an instances is located in. This
 controller thus also retrieves the subnet information from the cloud API and
 annotates the node object with it, see below for what this annotation looks
 like.
@@ -246,7 +246,7 @@ like.
 
 Clouds limit the amount of private IP addresses which can be associated with
 instances. Some have a variable capacity per instance type and IP family (AWS)
-others have a global and fix capacity defined (GCP/Azure). This controller *does
+others have a global and fixed capacity defined (GCP/Azure). This controller *does
 not* validate that if capacity is superseded or not, it is up to the client
 controller to initialize its state and track how many assignments are still
 possible.
