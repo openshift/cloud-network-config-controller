@@ -102,6 +102,8 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	if err != nil {
 		return err
 	}
+	applicationSecurityGroups := (*networkInterfaces[0].IPConfigurations)[0].InterfaceIPConfigurationPropertiesFormat.ApplicationSecurityGroups
+
 	// Perform the operation against the first interface listed, which will be
 	// the primary interface (if it's defined as such) or the first one returned
 	// following the order Azure specifies.
@@ -119,6 +121,7 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 			Subnet:                          (*networkInterface.IPConfigurations)[0].Subnet,
 			Primary:                         &untrue,
 			LoadBalancerBackendAddressPools: (*networkInterface.IPConfigurations)[0].LoadBalancerBackendAddressPools,
+			ApplicationSecurityGroups:       applicationSecurityGroups,
 		},
 	}
 	ipConfigurations = append(ipConfigurations, newIPConfiguration)
