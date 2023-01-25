@@ -453,7 +453,7 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 			}
 		}
 		klog.Infof("Skipping interface config. Neither the IPv4 nor the IPv6 network contain the first InternalIP "+
-			" of the node. Interface config: %q, IPv4 InternalIP: %q, IPv6 InternalIP: %q",
+			"of the node. Interface config: %q, IPv4 InternalIP: %q, IPv6 InternalIP: %q",
 			config, ipv4InternalIP, ipv6InternalIP)
 	}
 

@@ -738,9 +738,9 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		node                       *corev1.Node
-		expectedNodeEgressIPConfig []NodeEgressIPConfiguration
-		errString                  string
+		node                        *corev1.Node
+		expectedNodeEgressIPConfigs [][]NodeEgressIPConfiguration
+		errString                   string
 	}{
 		"Invalid node": {
 			node: &corev1.Node{
@@ -774,15 +774,17 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 					},
 				},
 			},
-			expectedNodeEgressIPConfig: []NodeEgressIPConfiguration{
+			expectedNodeEgressIPConfigs: [][]NodeEgressIPConfiguration{
 				{
-					Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
-					IFAddr: ifAddr{
-						IPv4: "192.0.2.0/24",
-						IPv6: "2000::/64",
-					},
-					Capacity: capacity{
-						IP: openstackMaxCapacity,
+					{
+						Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
+						IFAddr: ifAddr{
+							IPv4: "192.0.2.0/24",
+							IPv6: "2000::/64",
+						},
+						Capacity: capacity{
+							IP: openstackMaxCapacity,
+						},
 					},
 				},
 			},
@@ -808,15 +810,17 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 					},
 				},
 			},
-			expectedNodeEgressIPConfig: []NodeEgressIPConfiguration{
+			expectedNodeEgressIPConfigs: [][]NodeEgressIPConfiguration{
 				{
-					Interface: "ed5351a4-08b5-4ac6-b9c9-bbbe557df381",
-					IFAddr: ifAddr{
-						IPv4: "192.0.3.0/24",
-						IPv6: "2001::/64",
-					},
-					Capacity: capacity{
-						IP: openstackMaxCapacity,
+					{
+						Interface: "ed5351a4-08b5-4ac6-b9c9-bbbe557df381",
+						IFAddr: ifAddr{
+							IPv4: "192.0.3.0/24",
+							IPv6: "2001::/64",
+						},
+						Capacity: capacity{
+							IP: openstackMaxCapacity,
+						},
 					},
 				},
 			},
@@ -850,20 +854,25 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 					},
 				},
 			},
-			expectedNodeEgressIPConfig: []NodeEgressIPConfiguration{
+			expectedNodeEgressIPConfigs: [][]NodeEgressIPConfiguration{
 				{
-					Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
-					IFAddr: ifAddr{
-						IPv4: "192.0.2.0/24",
-						IPv6: "2000::/64",
-					},
-					Capacity: capacity{
-						IP: openstackMaxCapacity,
+					{
+						Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
+						IFAddr: ifAddr{
+							IPv4: "192.0.2.0/24",
+							IPv6: "2000::/64",
+						},
+						Capacity: capacity{
+							IP: openstackMaxCapacity,
+						},
 					},
 				},
 			},
 		},
-		"Valid node 3 - undefined behavior": {
+		// We only allow EgressIPs on the MachineNetwork (the first node internal address for each IP address family).
+		// Corner case: IPv4 InternalIP is on different interface than the IPv6 InternalIP. This should never happen in
+		// OpenShift. If it does, we simply return the first matching config regardless.
+		"Valid node 3 - undefined behavior, IPv4 InternalIP and IPv6 InternalIP on different networks": {
 			node: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node2",
@@ -875,11 +884,11 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 					Addresses: []corev1.NodeAddress{
 						{
 							Type:    corev1.NodeInternalIP,
-							Address: "192.0.2.10",
+							Address: "192.0.2.10", // InternalIPv4 on first port.
 						},
 						{
 							Type:    corev1.NodeInternalIP,
-							Address: "2001::10",
+							Address: "2001::10", // InternalIPv6 on second port.
 						},
 						{
 							Type:    corev1.NodeInternalIP,
@@ -892,15 +901,29 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 					},
 				},
 			},
-			expectedNodeEgressIPConfig: []NodeEgressIPConfiguration{
+			expectedNodeEgressIPConfigs: [][]NodeEgressIPConfiguration{
 				{
-					Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
-					IFAddr: ifAddr{
-						IPv4: "192.0.2.0/24",
-						IPv6: "2000::/64",
+					{
+						Interface: "319bb795-b08e-4b8f-b9d2-b3a7c8c1ab45",
+						IFAddr: ifAddr{
+							IPv4: "192.0.2.0/24",
+							IPv6: "2000::/64",
+						},
+						Capacity: capacity{
+							IP: openstackMaxCapacity,
+						},
 					},
-					Capacity: capacity{
-						IP: openstackMaxCapacity,
+				},
+				{
+					{
+						Interface: "ed5351a4-08b5-4ac6-b9c9-bbbe557df381",
+						IFAddr: ifAddr{
+							IPv4: "192.0.3.0/24",
+							IPv6: "2001::/64",
+						},
+						Capacity: capacity{
+							IP: openstackMaxCapacity,
+						},
 					},
 				},
 			},
@@ -923,28 +946,36 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 			t.Fatalf("TestGetNodeEgressIPConfiguration(%s): Expected to get no error but instead got: %q",
 				testName, err)
 		}
-		if len(tc.expectedNodeEgressIPConfig) != len(nodeEgressIPConfiguration) {
-			// Resolve pointers so that this becomes human readable.
-			got := ""
-			for _, v := range nodeEgressIPConfiguration {
-				got = fmt.Sprintf("%s %v", got, *v)
-			}
-			t.Fatalf("TestGetNodeEgressIPConfiguration(%s): nodeEgressIPConfiguration does not match. Got %q, expected %q",
-				testName, got, tc.expectedNodeEgressIPConfig)
-		}
-		for _, config := range nodeEgressIPConfiguration {
-			matched := false
-			for _, expectedConfig := range tc.expectedNodeEgressIPConfig {
-				if reflect.DeepEqual(config, &expectedConfig) {
-					matched = true
-					break
+		matched := false
+		i := 0
+		for _, expectedNodeEgressIPConfig := range tc.expectedNodeEgressIPConfigs {
+			i++
+			matchCount := 0
+			for _, config := range nodeEgressIPConfiguration {
+				for _, expectedConfig := range expectedNodeEgressIPConfig {
+					if reflect.DeepEqual(config, &expectedConfig) {
+						matchCount++
+					}
 				}
 			}
-			if !matched {
-				t.Fatalf("TestGetNodeEgressIPConfiguration(%s): nodeEgressIPConfiguration does not match. "+
-					"Config '%v' not found, expected '%v'",
-					testName, config, tc.expectedNodeEgressIPConfig)
+			if matchCount == len(expectedNodeEgressIPConfig) {
+				matched = true
+				break
 			}
+			lenExpectedNodeEgressIPConfigs := len(tc.expectedNodeEgressIPConfigs)
+			t.Logf("nodeEgressIPConfiguration does not match expectedNodeEgressIPConfigs[%d/%d].\n"+
+				"Expected to find the following NodeEgressIPConfig slice: %v\n"+
+				"Instead, the NodeEgressIPConfig looks like this: %v\n",
+				i, lenExpectedNodeEgressIPConfigs, expectedNodeEgressIPConfig, nodeEgressIPConfiguration)
+			if i < lenExpectedNodeEgressIPConfigs {
+				t.Logf("Verifying expectedNodeEgressIPConfigs[%d/%d] next", i+1, lenExpectedNodeEgressIPConfigs)
+			}
+		}
+		if !matched {
+			t.Fatalf("TestGetNodeEgressIPConfiguration(%s): no nodeEgressIPConfiguration matches.\n"+
+				"Expected to find either of the following NodeEgressIPConfigs: %v\n"+
+				"Instead, the NodeEgressIPConfig looks like this: %v\n",
+				testName, tc.expectedNodeEgressIPConfigs, nodeEgressIPConfiguration)
 		}
 	}
 }
