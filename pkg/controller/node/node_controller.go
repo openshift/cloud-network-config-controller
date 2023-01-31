@@ -57,7 +57,7 @@ func NewNodeController(
 	kubeClientset kubernetes.Interface,
 	cloudProviderClient cloudprovider.CloudProviderIntf,
 	nodeInformer coreinformers.NodeInformer,
-	cloudPrivateIPConfigInformer cloudnetworkinformers.CloudPrivateIPConfigInformer) *controller.CloudNetworkConfigController {
+	cloudPrivateIPConfigInformer cloudnetworkinformers.CloudPrivateIPConfigInformer) (*controller.CloudNetworkConfigController, error) {
 
 	nodeController := &NodeController{
 		nodesLister:                nodeInformer.Lister(),
@@ -74,7 +74,7 @@ func NewNodeController(
 		nodeControllerAgentType,
 	)
 
-	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.Enqueue,
 		UpdateFunc: func(oldN, newN interface{}) {
 			// Enqueue when an update to the node's taints occurred - for external cloud providers, we must
@@ -87,7 +87,10 @@ func NewNodeController(
 			}
 		},
 	})
-	return controller
+	if err != nil {
+		return nil, err
+	}
+	return controller, nil
 }
 
 // syncHandler compares the actual state with the desired, and attempts to

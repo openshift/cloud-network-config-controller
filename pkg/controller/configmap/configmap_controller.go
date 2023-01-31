@@ -39,7 +39,7 @@ func NewConfigMapController(
 	controllerCancel context.CancelFunc,
 	kubeClientset kubernetes.Interface,
 	configMapInformer coreinformers.ConfigMapInformer,
-	configMapName, configMapNamespace string) *controller.CloudNetworkConfigController {
+	configMapName, configMapNamespace string) (*controller.CloudNetworkConfigController, error) {
 
 	configMapController := &ConfigMapController{
 		configMapLister:  configMapInformer.Lister(),
@@ -65,7 +65,7 @@ func NewConfigMapController(
 		return false
 	}
 
-	configMapInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
+	_, err := configMapInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: configMapFilter,
 		Handler: cache.ResourceEventHandlerFuncs{
 			// Only handle updates and deletes
@@ -89,7 +89,10 @@ func NewConfigMapController(
 			DeleteFunc: controller.Enqueue,
 		},
 	})
-	return controller
+	if err != nil {
+		return nil, err
+	}
+	return controller, nil
 }
 
 // syncHandler does *not* compare the actual state with the desired, it's

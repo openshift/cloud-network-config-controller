@@ -39,7 +39,7 @@ func NewSecretController(
 	controllerCancel context.CancelFunc,
 	kubeClientset kubernetes.Interface,
 	secretInformer coreinformers.SecretInformer,
-	secretName, secretNamespace string) *controller.CloudNetworkConfigController {
+	secretName, secretNamespace string) (*controller.CloudNetworkConfigController, error) {
 
 	secretController := &SecretController{
 		secretLister:     secretInformer.Lister(),
@@ -65,7 +65,7 @@ func NewSecretController(
 		return false
 	}
 
-	secretInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
+	_, err := secretInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: secretFilter,
 		Handler: cache.ResourceEventHandlerFuncs{
 			// Only handle updates and deletes
@@ -89,7 +89,10 @@ func NewSecretController(
 			DeleteFunc: controller.Enqueue,
 		},
 	})
-	return controller
+	if err != nil {
+		return nil, err
+	}
+	return controller, nil
 }
 
 // syncHandler does *not* compare the actual state with the desired, it's

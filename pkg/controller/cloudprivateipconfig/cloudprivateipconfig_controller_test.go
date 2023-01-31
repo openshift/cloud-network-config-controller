@@ -82,7 +82,7 @@ type CloudPrivateIPConfigTestCase struct {
 	expectErrorOnReleaseSync           bool
 }
 
-func (t *CloudPrivateIPConfigTestCase) NewFakeCloudPrivateIPConfigController() *FakeCloudPrivateIPConfigController {
+func (t *CloudPrivateIPConfigTestCase) NewFakeCloudPrivateIPConfigController() (*FakeCloudPrivateIPConfigController, error) {
 
 	fakeCloudNetworkClient := fakecloudnetworkclientset.NewSimpleClientset([]runtime.Object{t.testObject}...)
 	fakeKubeClient := fakekubeclient.NewSimpleClientset()
@@ -91,13 +91,16 @@ func (t *CloudPrivateIPConfigTestCase) NewFakeCloudPrivateIPConfigController() *
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(fakeKubeClient, 0)
 	cloudNetworkInformerFactory := cloudnetworkinformers.NewSharedInformerFactory(fakeCloudNetworkClient, 0)
 
-	cloudPrivateIPConfigController := NewCloudPrivateIPConfigController(
+	cloudPrivateIPConfigController, err := NewCloudPrivateIPConfigController(
 		context.TODO(),
 		fakeCloudProvider,
 		fakeCloudNetworkClient,
 		cloudNetworkInformerFactory.Cloud().V1().CloudPrivateIPConfigs(),
 		kubeInformerFactory.Core().V1().Nodes(),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	fakeCloudPrivateIPConfigController := &FakeCloudPrivateIPConfigController{
 		CloudNetworkConfigController: cloudPrivateIPConfigController,
@@ -110,7 +113,7 @@ func (t *CloudPrivateIPConfigTestCase) NewFakeCloudPrivateIPConfigController() *
 
 	fakeCloudPrivateIPConfigController.initTestSetup(t.testObject)
 
-	return fakeCloudPrivateIPConfigController
+	return fakeCloudPrivateIPConfigController, nil
 }
 
 func assertSyncedExpectedObjectsEqual(synced, expected *cloudnetworkv1.CloudPrivateIPConfig) error {
@@ -510,7 +513,7 @@ func TestSyncAddCloudPrivateIPConfig(t *testing.T) {
 				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
 					Node: nodeNameA,
 					Conditions: []v1.Condition{
-						v1.Condition{
+						{
 							Type:   string(cloudnetworkv1.Assigned),
 							Status: v1.ConditionTrue,
 							Reason: cloudResponseReasonSuccess,
@@ -1050,7 +1053,10 @@ func TestSyncUpdateCloudPrivateIPConfig(t *testing.T) {
 func runTests(t *testing.T, tests []CloudPrivateIPConfigTestCase) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			controller := test.NewFakeCloudPrivateIPConfigController()
+			controller, err := test.NewFakeCloudPrivateIPConfigController()
+			if err != nil {
+				t.Fatalf("NewFakeCloudPrivateIPConfigController expected no error, but got err: %v", err)
+			}
 			if test.isUpdate {
 				if err := controller.CloudNetworkConfigController.SyncHandler(test.testObject.Name); err != nil && !test.expectErrorOnReleaseSync {
 					t.Fatalf("sync expected no error, but got err: %v", err)

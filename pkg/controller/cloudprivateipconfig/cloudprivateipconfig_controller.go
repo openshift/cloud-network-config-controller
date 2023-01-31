@@ -66,7 +66,7 @@ func NewCloudPrivateIPConfigController(
 	cloudProviderClient cloudprovider.CloudProviderIntf,
 	cloudNetworkClientset cloudnetworkclientset.Interface,
 	cloudPrivateIPConfigInformer cloudnetworkinformers.CloudPrivateIPConfigInformer,
-	nodeInformer coreinformers.NodeInformer) *controller.CloudNetworkConfigController {
+	nodeInformer coreinformers.NodeInformer) (*controller.CloudNetworkConfigController, error) {
 
 	utilruntime.Must(cloudnetworkscheme.AddToScheme(scheme.Scheme))
 
@@ -84,7 +84,7 @@ func NewCloudPrivateIPConfigController(
 		cloudPrivateIPConfigControllerAgentType,
 	)
 
-	cloudPrivateIPConfigInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err := cloudPrivateIPConfigInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.Enqueue,
 		UpdateFunc: func(old, new interface{}) {
 			oldCloudPrivateIPConfig, _ := old.(*cloudnetworkv1.CloudPrivateIPConfig)
@@ -114,7 +114,10 @@ func NewCloudPrivateIPConfigController(
 		},
 		DeleteFunc: controller.Enqueue,
 	})
-	return controller
+	if err != nil {
+		return nil, err
+	}
+	return controller, nil
 }
 
 // syncHandler compares the actual state with the desired, and attempts to
