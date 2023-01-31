@@ -104,6 +104,12 @@ type NodeEgressIPConfiguration struct {
 	Capacity  capacity `json:"capacity"`
 }
 
+// String implements the stringer interface for pointers to NodeEgressIPConfiguration. This is used for the unit tests
+// as it simplifies printing of the actual values instead of returning the memory address that is being pointed to.
+func (n *NodeEgressIPConfiguration) String() string {
+	return fmt.Sprintf("%v", *n)
+}
+
 func NewCloudProviderClient(cfg CloudProviderConfig) (CloudProviderIntf, error) {
 	var cloudProviderIntf CloudProviderIntf
 
