@@ -104,21 +104,27 @@ func main() {
 				kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, time.Minute*2, kubeinformers.WithNamespace(controllerNamespace))
 				cloudNetworkInformerFactory := cloudnetworkinformers.NewSharedInformerFactory(cloudNetworkClient, time.Minute*2)
 
-				cloudPrivateIPConfigController := cloudprivateipconfigcontroller.NewCloudPrivateIPConfigController(
+				cloudPrivateIPConfigController, err := cloudprivateipconfigcontroller.NewCloudPrivateIPConfigController(
 					ctx,
 					cloudProviderClient,
 					cloudNetworkClient,
 					cloudNetworkInformerFactory.Cloud().V1().CloudPrivateIPConfigs(),
 					kubeInformerFactory.Core().V1().Nodes(),
 				)
-				nodeController := nodecontroller.NewNodeController(
+				if err != nil {
+					klog.Fatalf("Error getting cloud private ip controller, err: %v", err)
+				}
+				nodeController, err := nodecontroller.NewNodeController(
 					ctx,
 					kubeClient,
 					cloudProviderClient,
 					kubeInformerFactory.Core().V1().Nodes(),
 					cloudNetworkInformerFactory.Cloud().V1().CloudPrivateIPConfigs(),
 				)
-				secretController := secretcontroller.NewSecretController(
+				if err != nil {
+					klog.Fatalf("Error getting node controller, err: %v", err)
+				}
+				secretController, err := secretcontroller.NewSecretController(
 					ctx,
 					cancelFunc,
 					kubeClient,
@@ -126,6 +132,9 @@ func main() {
 					secretName,
 					controllerNamespace,
 				)
+				if err != nil {
+					klog.Fatalf("Error getting secret controller, err: %v", err)
+				}
 
 				cloudNetworkInformerFactory.Start(stopCh)
 				kubeInformerFactory.Start(stopCh)
@@ -152,7 +161,7 @@ func main() {
 				if configName != "" && ((platformCfg.PlatformType == cloudprovider.PlatformTypeAWS && platformCfg.AWSCAOverride != "") ||
 					platformCfg.PlatformType == cloudprovider.PlatformTypeOpenStack) {
 					klog.Infof("Starting the ConfigMap operator to monitor '%s'", configName)
-					configMapController := configmapcontroller.NewConfigMapController(
+					configMapController, err := configmapcontroller.NewConfigMapController(
 						ctx,
 						cancelFunc,
 						kubeClient,
@@ -160,6 +169,9 @@ func main() {
 						configName,
 						controllerNamespace,
 					)
+					if err != nil {
+						klog.Fatalf("Error getting configmap controller, err: %v", err)
+					}
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
