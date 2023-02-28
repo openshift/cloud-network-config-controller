@@ -59,6 +59,20 @@ type CloudProviderIntf interface {
 	GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error)
 }
 
+// CloudProviderWithMoveIntf is additional interface that can be added to cloud
+// plugins that can benefit from a separate set of operations on IP address
+// failover, instead of running ReleasePrivateIP followed by AssignPrivateIP.
+type CloudProviderWithMoveIntf interface {
+	// MovePrivateIP is called instead of ReleasePrivateIP followed by
+	// AssignPrivateIP if plugin implements CloudProviderWithMoveIntf. It
+	// should effectively move IP address from nodeToDel to nodeToAdd, but not
+	// necessarily remove resources from the cloud. E.g. in case of OpenStack
+	// we don't want to delete the reservation Neutron port, but rather just
+	// manipulate allowedAddressPairs on the nodeToDel and nodeToAdd ports to
+	// move the IP from one node to another.
+	MovePrivateIP(ip net.IP, nodeToAdd *corev1.Node, nodeToDel *corev1.Node) error
+}
+
 // CloudProviderConfig is all the command-line options needed to initialize
 // a cloud provider client.
 type CloudProviderConfig struct {

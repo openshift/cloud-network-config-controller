@@ -408,6 +408,14 @@ func portListHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	deviceID := r.URL.Query().Get("device_id")
 	deviceOwner := r.URL.Query().Get("device_owner")
 	networkID := r.URL.Query().Get("network_id")
+	IPs := r.URL.Query()["fixed_ips"]
+	IP := ""
+	for _, val := range IPs {
+		if strings.HasPrefix(val, "ip_address=") {
+			IP = strings.TrimPrefix(val, "ip_address=")
+			break
+		}
+	}
 
 	var portList []neutronports.Port
 	for _, p := range portMap {
@@ -419,6 +427,17 @@ func portListHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
 		}
 		if networkID != "" && networkID != p.NetworkID {
 			continue
+		}
+		if IP != "" {
+			matched := false
+			for _, fixedIP := range p.FixedIPs {
+				if fixedIP.IPAddress == IP {
+					matched = true
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		portList = append(portList, p)
 	}
@@ -1196,11 +1215,10 @@ func TestReserveAndReleaseNeutronIPAddress(t *testing.T) {
 		},
 		// ... and try to create a duplicate of it.
 		{
-			subnet:    subnetMap["de0cda14-6ac6-4439-bc94-da0a27938b7b"],
-			ip:        net.ParseIP("2000::9"), // reserving the same IP address 2x shall fail
-			reserve:   true,
-			nodeName:  "node1",
-			errString: "but got 409 instead",
+			subnet:   subnetMap["de0cda14-6ac6-4439-bc94-da0a27938b7b"],
+			ip:       net.ParseIP("2000::9"), // reserving the same IP address 2x should find the existing port
+			reserve:  true,
+			nodeName: "node1",
 		},
 		// Release the first IPv6 port.
 		{
