@@ -129,7 +129,7 @@ func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 }
 
 func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPConfiguration, error) {
-	project, _, instance, err := g.getInstance(node)
+	_, _, instance, err := g.getInstance(node)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving instance associated with node, err: %v", err)
 	}
@@ -143,7 +143,8 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node) ([]*NodeEgressIPCo
 		config := &NodeEgressIPConfiguration{
 			Interface: networkInterface.Name,
 		}
-		v4Subnet, v6Subnet, err := g.getSubnet(project, networkInterface)
+
+		v4Subnet, v6Subnet, err := g.getSubnet(networkInterface)
 		if err != nil {
 			return nil, fmt.Errorf("error retrieving the network interface subnets, err: %v", err)
 		}
@@ -183,12 +184,14 @@ func (g *GCP) waitForCompletion(project, zone, opName string) error {
 	return nil
 }
 
-func (g *GCP) getSubnet(project string, networkInterface *google.NetworkInterface) (*net.IPNet, *net.IPNet, error) {
+func (g *GCP) getSubnet(networkInterface *google.NetworkInterface) (*net.IPNet, *net.IPNet, error) {
 	var v4Subnet, v6Subnet *net.IPNet
-	region, subnet, err := g.parseSubnet(networkInterface.Subnetwork)
+	project, region, subnet, err := g.parseSubnet(networkInterface.Subnetwork)
+
 	if err != nil {
 		return nil, nil, err
 	}
+
 	subnetResult, err := g.client.Subnetworks.Get(project, region, subnet).Do()
 	if err != nil {
 		return nil, nil, err
@@ -225,7 +228,7 @@ func (g *GCP) getCapacity(networkInterface *google.NetworkInterface) int {
 	return defaultGCPPrivateIPCapacity - currentIPv4Usage - currentIPv6Usage
 }
 
-// getInstance retrieves the GCP instance referrred by the Node object.
+// getInstance retrieves the GCP instance referred by the Node object.
 // returns the project and zone name as well.
 func (g *GCP) getInstance(node *corev1.Node) (string, string, *google.Instance, error) {
 	project, zone, instance, err := splitGCPNode(node)
@@ -277,10 +280,11 @@ func splitGCPNode(node *corev1.Node) (project, zone, instance string, err error)
 // - https://www.googleapis.com/compute/v1/projects/project/regions/region/subnetworks/subnetwork
 // OR
 // - regions/region/subnetworks/subnetwork
-func (g *GCP) parseSubnet(subnetURL string) (string, string, error) {
+func (g *GCP) parseSubnet(subnetURL string) (string, string, string, error) {
 	subnetURLParts := strings.Split(subnetURL, "/")
 	if len(subnetURLParts) != 11 {
-		return "", "", UnexpectedURIError(subnetURL)
+		return "", "", "", UnexpectedURIError(subnetURL)
 	}
-	return subnetURLParts[len(subnetURLParts)-3], subnetURLParts[len(subnetURLParts)-1], nil
+	return subnetURLParts[len(subnetURLParts)-5], subnetURLParts[len(subnetURLParts)-3],
+		subnetURLParts[len(subnetURLParts)-1], nil
 }
