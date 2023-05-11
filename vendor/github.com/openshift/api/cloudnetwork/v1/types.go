@@ -14,6 +14,8 @@ import (
 // decides to edit it for some reason, their changes will be overwritten the
 // next time the network plugin reconciles the object. Note: the CR's name
 // must specify the requested private IP address (can be IPv4 or IPv6).
+//
+// Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer).
 // +genclient
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -21,8 +23,12 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=cloudprivateipconfigs,scope=Cluster
+// +openshift:compatibility-gen:level=1
 type CloudPrivateIPConfig struct {
-	metav1.TypeMeta   `json:",inline"`
+	metav1.TypeMeta `json:",inline"`
+
+	// metadata is the standard object's metadata.
+	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 	// spec is the definition of the desired private IP request.
 	// +kubebuilder:validation:Required
@@ -68,11 +74,16 @@ const (
 	Assigned CloudPrivateIPConfigConditionType = "Assigned"
 )
 
+// Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer).
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +resource:path=cloudprivateipconfig
 // CloudPrivateIPConfigList is the list of CloudPrivateIPConfigList.
+// +openshift:compatibility-gen:level=1
 type CloudPrivateIPConfigList struct {
 	metav1.TypeMeta `json:",inline"`
+
+	// metadata is the standard list's metadata.
+	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
 	metav1.ListMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
 	// List of CloudPrivateIPConfig.

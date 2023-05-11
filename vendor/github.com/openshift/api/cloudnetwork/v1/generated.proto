@@ -10,7 +10,7 @@ import "k8s.io/apimachinery/pkg/runtime/generated.proto";
 import "k8s.io/apimachinery/pkg/runtime/schema/generated.proto";
 
 // Package-wide variables from generator "generated".
-option go_package = "v1";
+option go_package = "github.com/openshift/api/cloudnetwork/v1";
 
 // CloudPrivateIPConfig performs an assignment of a private IP address to the
 // primary NIC associated with cloud VMs. This is done by specifying the IP and
@@ -22,6 +22,8 @@ option go_package = "v1";
 // decides to edit it for some reason, their changes will be overwritten the
 // next time the network plugin reconciles the object. Note: the CR's name
 // must specify the requested private IP address (can be IPv4 or IPv6).
+//
+// Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer).
 // +genclient
 // +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -29,7 +31,10 @@ option go_package = "v1";
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=cloudprivateipconfigs,scope=Cluster
+// +openshift:compatibility-gen:level=1
 message CloudPrivateIPConfig {
+  // metadata is the standard object's metadata.
+  // More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
   optional k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
   // spec is the definition of the desired private IP request.
@@ -43,10 +48,14 @@ message CloudPrivateIPConfig {
   optional CloudPrivateIPConfigStatus status = 3;
 }
 
+// Compatibility level 1: Stable within a major release for a minimum of 12 months or 3 minor releases (whichever is longer).
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +resource:path=cloudprivateipconfig
 // CloudPrivateIPConfigList is the list of CloudPrivateIPConfigList.
+// +openshift:compatibility-gen:level=1
 message CloudPrivateIPConfigList {
+  // metadata is the standard list's metadata.
+  // More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
   optional k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
 
   // List of CloudPrivateIPConfig.
