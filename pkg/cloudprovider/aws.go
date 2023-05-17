@@ -2,6 +2,7 @@ package cloudprovider
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -45,7 +46,7 @@ func (a *AWS) initCredentials() error {
 	}
 	if a.cfg.APIOverride != "" {
 		customResolver := func(service, region string, optFns ...func(*endpoints.Options)) (endpoints.ResolvedEndpoint, error) {
-			if service == endpoints.Ec2ServiceID {
+			if service == ec2.EndpointsID {
 				return endpoints.ResolvedEndpoint{
 					URL:           a.cfg.APIOverride,
 					SigningRegion: a.cfg.Region,
@@ -226,7 +227,7 @@ func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConf
 // all IPs that we add are assigned to the node, and on DEL that all IPs being
 // removed have been completely removed from the node.
 func (a *AWS) waitForCompletion(node *corev1.Node, ips []string, deleteOp bool) error {
-	return wait.PollImmediate(time.Second*2, time.Minute, func() (done bool, err error) {
+	return wait.PollUntilContextTimeout(context.Background(), time.Second*2, time.Minute, true, func(ctx context.Context) (done bool, err error) {
 		instance, err := a.getInstance(node)
 		if err != nil {
 			return false, err
