@@ -15,11 +15,11 @@ import (
 
 const (
 	PlatformTypeGCP = "GCP"
-	// GCP hard-codes the amount of alias IPs that can be assigned to a NIC to 10 -
-	// independently of IP family, so we need to retrive the amount of alias IPs
-	// already in use by default and subtract from 10. See:
+	// GCP hard-codes the amount of alias IPs that can be assigned to a NIC to 100 -
+	// independently of IP family, so we need to retrieve the amount of alias IPs
+	// already in use by default and subtract from 100. See:
 	// https://cloud.google.com/vpc/docs/quota#per_instance .
-	defaultGCPPrivateIPCapacity = 10
+	defaultGCPPrivateIPCapacity = 100
 )
 
 // GCP implements the API wrapper for talking
