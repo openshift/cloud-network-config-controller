@@ -189,7 +189,12 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		klog.Infof("CloudPrivateIPConfig: %q will be deleted from node: %q", key, nodeToDel)
 
 		node, err := c.nodesLister.Get(nodeToDel)
-		if err != nil {
+		// there is a case when the node was deleted and the ip still needs to be released. if the node
+		// doesn't exist, nodesLister.Get() will still return and error but if that error is just that the
+		// node doesn't exist, we can carry on with the release
+		if err != nil && apierrors.IsNotFound(err) {
+			klog.Infof("Node: %s no longer exists. Will still need to unassign CloudPrivateIPConfig: %q", nodeToDel, key)
+		} else if err != nil {
 			return err
 		}
 
@@ -212,29 +217,33 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 			return fmt.Errorf("error updating CloudPrivateIPConfig: %q during delete operation, err: %v", key, err)
 		}
 
-		// This is a blocking call. If the IP is not assigned then don't treat
-		// it as an error.
-		if releaseErr := c.cloudProviderClient.ReleasePrivateIP(ip, node); releaseErr != nil && !errors.Is(releaseErr, cloudprovider.NonExistingIPError) {
-			// Delete operation encountered an error, requeue
-			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
-				Node: nodeToDel,
-				Conditions: []metav1.Condition{
-					{
-						Type:               string(cloudnetworkv1.Assigned),
-						Status:             metav1.ConditionFalse,
-						ObservedGeneration: cloudPrivateIPConfig.Generation,
-						LastTransitionTime: metav1.Now(),
-						Reason:             cloudResponseReasonError,
-						Message:            fmt.Sprintf("Error processing cloud release request, err: %v", releaseErr),
+		// it's possible that the node can be deleted entirely so releasing the IP
+		// from the node does not make sense
+		if node != nil {
+			// This is a blocking call. If the IP is not assigned then don't treat
+			// it as an error.
+			if releaseErr := c.cloudProviderClient.ReleasePrivateIP(ip, node); releaseErr != nil && !errors.Is(releaseErr, cloudprovider.NonExistingIPError) {
+				// Delete operation encountered an error, requeue
+				status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeToDel,
+					Conditions: []metav1.Condition{
+						{
+							Type:               string(cloudnetworkv1.Assigned),
+							Status:             metav1.ConditionFalse,
+							ObservedGeneration: cloudPrivateIPConfig.Generation,
+							LastTransitionTime: metav1.Now(),
+							Reason:             cloudResponseReasonError,
+							Message:            fmt.Sprintf("Error processing cloud release request, err: %v", releaseErr),
+						},
 					},
-				},
+				}
+				// Always requeue the object if we end up here. We need to make sure
+				// we try to clean up the IP on the cloud
+				if _, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+					return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error releasing cloud assignment, err: %v", key, err)
+				}
+				return fmt.Errorf("error releasing CloudPrivateIPConfig: %q from node: %q, err: %v", key, node.Name, releaseErr)
 			}
-			// Always requeue the object if we end up here. We need to make sure
-			// we try to clean up the IP on the cloud
-			if _, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
-				return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for error releasing cloud assignment, err: %v", key, err)
-			}
-			return fmt.Errorf("error releasing CloudPrivateIPConfig: %q from node: %q, err: %v", key, node.Name, releaseErr)
 		}
 
 		// Process real object deletion. We're using a finalizer, so it depends
@@ -255,7 +264,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		}
 
 		// Update the status one last time, informing consumers of this status
-		// that we've successfully delete the IP in the cloud
+		// that we've successfully deleted the IP in the cloud
 		status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
 			Conditions: []metav1.Condition{
 				{
@@ -268,7 +277,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 				},
 			},
 		}
-		klog.Infof("Deleted IP address from node: %q for CloudPrivateIPConfig: %q", node.Name, key)
+		klog.Infof("Deleted IP address for CloudPrivateIPConfig: %q", key)
 	case nodeToAdd != "":
 		klog.Infof("CloudPrivateIPConfig: %q will be added to node: %q", key, nodeToAdd)
 
