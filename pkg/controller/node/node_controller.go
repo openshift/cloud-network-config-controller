@@ -104,14 +104,7 @@ func (n *NodeController) SyncHandler(key string) error {
 		klog.Infof("corev1.Node: '%s' in work queue no longer exists", key)
 		return nil
 	}
-	// If the node already has the annotation (ex: if we restart it is expected
-	// that the nodes would) we skip it. Subnets won't change and we are only
-	// interested in conveying the default assignment capacity that the node had
-	// when it started existing. It's up to the network plugin to track how much
-	// capacity it has left depending on the assignments it performs.
-	if _, ok := node.Annotations[nodeEgressIPConfigAnnotationKey]; ok {
-		return nil
-	}
+
 	// Skip synchronization if this node is still uninitialized by the Cloud Controller Manager,
 	// meaning that it still has taint cloudproviderapi.TaintExternalCloudProvider.
 	if taintKeyExists(node.Spec.Taints, cloudproviderapi.TaintExternalCloudProvider) {
