@@ -3,24 +3,34 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"sync"
 	"time"
 
+	configv1 "github.com/openshift/api/config/v1"
 	cloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
 	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
+	configclient "github.com/openshift/client-go/config/clientset/versioned"
+	configinformers "github.com/openshift/client-go/config/informers/externalversions"
 	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
 	cloudprivateipconfigcontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/cloudprivateipconfig"
 	configmapcontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/configmap"
 	nodecontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/node"
 	secretcontroller "github.com/openshift/cloud-network-config-controller/pkg/controller/secret"
 	signals "github.com/openshift/cloud-network-config-controller/pkg/signals"
+	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
+	"github.com/openshift/library-go/pkg/operator/events"
+	corev1 "k8s.io/api/core/v1"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	kscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
+	controllerclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -28,6 +38,10 @@ const (
 	resourceLockName          = "cloud-network-config-controller-lock"
 	controllerNameEnvVar      = "CONTROLLER_NAME"
 	controllerNamespaceEnvVar = "CONTROLLER_NAMESPACE"
+	operatorVersionEnvVar     = "RELEASE_VERSION"
+	defaultOperatorVersion    = "0.0.1-snapshot"
+	deploymentName            = "cloud-network-config-controller"
+	globalInfrastructureName  = "cluster"
 )
 
 var (
@@ -64,6 +78,11 @@ func main() {
 		klog.Exitf("Error building kubernetes clientset: %s", err.Error())
 	}
 
+	platformStatus, err := getPlatformStatus(cfg)
+	if err != nil {
+		klog.Exitf("Error getting platform status from cluster infrastructure: %s", err.Error())
+	}
+
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsLeasesResourceLock,
 		controllerNamespace,
@@ -91,12 +110,30 @@ func main() {
 		RetryPeriod:     26 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
+				featureGateAccessor, err := createFeatureGateAccessor(
+					ctx,
+					cfg,
+					os.Getenv(controllerNameEnvVar),
+					os.Getenv(controllerNamespaceEnvVar),
+					deploymentName,
+					getReleaseVersion(),
+					stopCh,
+				)
+				if err != nil {
+					klog.Exitf("Error building feature gate accessor: %s", err.Error())
+				}
+
+				featureGates, err := awaitEnabledFeatureGates(featureGateAccessor, 1*time.Minute)
+				if err != nil {
+					klog.Fatalf("Failed to get feature gates: %w", err)
+				}
+
 				cloudNetworkClient, err := cloudnetworkclientset.NewForConfig(cfg)
 				if err != nil {
 					klog.Exitf("Error building cloudnetwork clientset: %s", err.Error())
 				}
 
-				cloudProviderClient, err := cloudprovider.NewCloudProviderClient(platformCfg)
+				cloudProviderClient, err := cloudprovider.NewCloudProviderClient(platformCfg, platformStatus, featureGates)
 				if err != nil {
 					klog.Fatalf("Error building cloud provider client, err: %v", err)
 				}
@@ -233,4 +270,87 @@ func init() {
 	if controllerNamespace == "" || controllerName == "" {
 		klog.Exit("Controller ENV variables are empty: %q: %s, %q: %s, cannot initialize controller", controllerNamespaceEnvVar, controllerNamespace, controllerNameEnvVar, controllerName)
 	}
+}
+
+// By default, when the enabled/disabled list of featuregates changes, os.Exit is called.
+// See featuregates.NewFeatureGateAccess for more information
+func createFeatureGateAccessor(ctx context.Context, cfg *rest.Config, operatorName, namespace, deploymentName, operatorVersion string, stop <-chan struct{}) (featuregates.FeatureGateAccess, error) {
+	ctx, cancelFn := context.WithCancel(ctx)
+	go func() {
+		defer cancelFn()
+		<-stop
+	}()
+
+	kubeClient, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kube client: %w", err)
+	}
+
+	eventRecorder := events.NewKubeRecorder(kubeClient.CoreV1().Events(namespace), operatorName, &corev1.ObjectReference{
+		APIVersion: "apps/v1",
+		Kind:       "Deployment",
+		Namespace:  namespace,
+		Name:       deploymentName,
+	})
+
+	configClient, err := configclient.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create config client: %w", err)
+	}
+	configInformers := configinformers.NewSharedInformerFactory(configClient, 10*time.Minute)
+
+	featureGateAccessor := featuregates.NewFeatureGateAccess(
+		operatorVersion, defaultOperatorVersion,
+		configInformers.Config().V1().ClusterVersions(), configInformers.Config().V1().FeatureGates(),
+		eventRecorder,
+	)
+	go featureGateAccessor.Run(ctx)
+	go configInformers.Start(stop)
+
+	return featureGateAccessor, nil
+}
+
+func awaitEnabledFeatureGates(accessor featuregates.FeatureGateAccess, timeout time.Duration) (featuregates.FeatureGate, error) {
+	select {
+	case <-accessor.InitialFeatureGatesObserved():
+		featureGates, err := accessor.CurrentFeatureGates()
+		if err != nil {
+			return nil, err
+		} else {
+			klog.Infof("FeatureGates initialized: knownFeatureGates=%v", featureGates.KnownFeatures())
+			return featureGates, nil
+		}
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("timed out waiting for FeatureGate detection")
+	}
+}
+
+func getReleaseVersion() string {
+	releaseVersion := os.Getenv(operatorVersionEnvVar)
+	if len(releaseVersion) == 0 {
+		return defaultOperatorVersion
+	}
+	return releaseVersion
+}
+
+func getPlatformStatus(cfg *rest.Config) (*configv1.PlatformStatus, error) {
+	scheme := kscheme.Scheme
+	err := configv1.Install(scheme)
+	if err != nil {
+		return nil, fmt.Errorf("failed to install scheme: %w", err)
+	}
+
+	client, err := controllerclient.New(cfg, controllerclient.Options{Scheme: scheme})
+	if err != nil {
+		klog.Exitf("Error building controller runtime client: %s", err.Error())
+	}
+
+	infra := &configv1.Infrastructure{}
+	infraName := controllerclient.ObjectKey{Name: globalInfrastructureName}
+
+	if err := client.Get(context.Background(), infraName, infra); err != nil {
+		return nil, fmt.Errorf("failed to get infrastructure: %w", err)
+	}
+
+	return infra.Status.PlatformStatus, nil
 }
