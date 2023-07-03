@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/jongio/azidext/go/azidext"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
+	configv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -37,27 +39,39 @@ const (
 // to the Azure cloud API
 type Azure struct {
 	CloudProvider
-	resourceGroup        string
-	env                  azure.Environment
-	vmClient             compute.VirtualMachinesClient
-	virtualNetworkClient network.VirtualNetworksClient
-	networkClient        network.InterfacesClient
-	nodeMapLock          sync.Mutex
-	nodeLockMap          map[string]*sync.Mutex
+	platformStatus               *configv1.AzurePlatformStatus
+	resourceGroup                string
+	env                          azure.Environment
+	vmClient                     compute.VirtualMachinesClient
+	virtualNetworkClient         network.VirtualNetworksClient
+	networkClient                network.InterfacesClient
+	nodeMapLock                  sync.Mutex
+	nodeLockMap                  map[string]*sync.Mutex
+	azureWorkloadIdentityEnabled bool
 }
 
 func (a *Azure) initCredentials() error {
 	clientID, err := a.readSecretData("azure_client_id")
 	if err != nil {
-		return err
+		// Fallback to using client ID from env variable if not set.
+		clientID = os.Getenv("AZURE_CLIENT_ID")
+		if strings.TrimSpace(clientID) == "" {
+			return err
+		}
 	}
 	tenantID, err := a.readSecretData("azure_tenant_id")
 	if err != nil {
-		return err
+		// Fallback to using tenant ID from env variable if not set.
+		tenantID = os.Getenv("AZURE_TENANT_ID")
+		if strings.TrimSpace(tenantID) == "" {
+			return err
+		}
 	}
 	clientSecret, err := a.readSecretData("azure_client_secret")
 	if err != nil {
-		return err
+		clientSecret = os.Getenv("AZURE_CLIENT_SECRET")
+		// Skip validation; fallback to token workload identity token if env variable is also not set.
+		klog.Infof("Attempting to create workload identity client because azure_client_secret is missing")
 	}
 	subscriptionID, err := a.readSecretData("azure_subscription_id")
 	if err != nil {
@@ -65,7 +79,20 @@ func (a *Azure) initCredentials() error {
 	}
 	a.resourceGroup, err = a.readSecretData("azure_resourcegroup")
 	if err != nil {
-		return err
+		if a.platformStatus != nil && len(strings.TrimSpace(a.platformStatus.ResourceGroupName)) > 0 {
+			klog.Infof("Attempting to use resource group from cluster infrastructure because azure_resourcegroup is missing")
+			a.resourceGroup = strings.TrimSpace(a.platformStatus.ResourceGroupName)
+		} else {
+			return err
+		}
+	}
+	tokenFile, err := a.readSecretData("azure_federated_token_file")
+	if err != nil {
+		tokenFile = os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+		if strings.TrimSpace(tokenFile) == "" {
+			// Use default value if no configuration is set
+			tokenFile = "/var/run/secrets/openshift/serviceaccount/token"
+		}
 	}
 
 	// Pick the Azure "Environment", which is just a named set of API endpoints.
@@ -82,7 +109,7 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
 	}
 
-	authorizer, err := a.getAuthorizer(a.env, clientID, clientSecret, tenantID)
+	authorizer, err := a.getAuthorizer(a.env, clientID, clientSecret, tenantID, tokenFile)
 	if err != nil {
 		return err
 	}
@@ -402,7 +429,7 @@ func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string
 	return *virtualNetwork.AddressSpace.AddressPrefixes, nil
 }
 
-func (a *Azure) getAuthorizer(env azureapi.Environment, clientID, clientSecret, tenantID string) (autorest.Authorizer, error) {
+func (a *Azure) getAuthorizer(env azureapi.Environment, clientID, clientSecret, tenantID, tokenFile string) (autorest.Authorizer, error) {
 	var cloudConfig cloud.Configuration
 	switch env {
 	case azureapi.PublicCloud:
@@ -422,15 +449,36 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, clientID, clientSecret, 
 			},
 		}
 	}
-	options := azidentity.ClientSecretCredentialOptions{
-		ClientOptions: azcore.ClientOptions{
-			Cloud: cloudConfig,
-		},
+
+	var (
+		cred azcore.TokenCredential
+		err  error
+	)
+	if a.azureWorkloadIdentityEnabled && strings.TrimSpace(clientSecret) == "" {
+		options := azidentity.WorkloadIdentityCredentialOptions{
+			ClientOptions: azcore.ClientOptions{
+				Cloud: cloudConfig,
+			},
+			ClientID:      clientID,
+			TenantID:      tenantID,
+			TokenFilePath: tokenFile,
+		}
+		cred, err = azidentity.NewWorkloadIdentityCredential(&options)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		options := azidentity.ClientSecretCredentialOptions{
+			ClientOptions: azcore.ClientOptions{
+				Cloud: cloudConfig,
+			},
+		}
+		cred, err = azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, &options)
+		if err != nil {
+			return nil, err
+		}
 	}
-	cred, err := azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, &options)
-	if err != nil {
-		return nil, err
-	}
+
 	scope := env.TokenAudience
 	if !strings.HasSuffix(scope, "/.default") {
 		scope += "/.default"

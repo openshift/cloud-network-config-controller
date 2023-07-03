@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	configv1 "github.com/openshift/api/config/v1"
+	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	"net"
 	"os"
 	"path/filepath"
@@ -124,7 +126,7 @@ func (n *NodeEgressIPConfiguration) String() string {
 	return fmt.Sprintf("%v", *n)
 }
 
-func NewCloudProviderClient(cfg CloudProviderConfig) (CloudProviderIntf, error) {
+func NewCloudProviderClient(cfg CloudProviderConfig, platformStatus *configv1.PlatformStatus, featureGates featuregates.FeatureGate) (CloudProviderIntf, error) {
 	var cloudProviderIntf CloudProviderIntf
 
 	// Initialize a separate context from the main context, rationale: cloud
@@ -141,9 +143,16 @@ func NewCloudProviderClient(cfg CloudProviderConfig) (CloudProviderIntf, error) 
 
 	switch cfg.PlatformType {
 	case PlatformTypeAzure:
+		var azurePlatformStatus *configv1.AzurePlatformStatus
+		if platformStatus != nil && platformStatus.Type == PlatformTypeAzure {
+			azurePlatformStatus = platformStatus.Azure
+		}
+
 		cloudProviderIntf = &Azure{
-			CloudProvider: cp,
-			nodeLockMap:   make(map[string]*sync.Mutex),
+			CloudProvider:                cp,
+			platformStatus:               azurePlatformStatus,
+			nodeLockMap:                  make(map[string]*sync.Mutex),
+			azureWorkloadIdentityEnabled: featureGates.Enabled(configv1.FeatureGateAzureWorkloadIdentity),
 		}
 	case PlatformTypeAWS:
 		cloudProviderIntf = &AWS{
