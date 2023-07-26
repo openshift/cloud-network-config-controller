@@ -29,3 +29,23 @@ func TestSplitGCPNode(t *testing.T) {
 		t.Fatalf("wrong name: %s", instance)
 	}
 }
+
+func TestParseSubnet(t *testing.T) {
+	subnetURI := "https://www.googleapis.com/compute/v1/projects/openshift-qe-shared-vpc/regions/us-central1/subnetworks/installer-shared-vpc-subnet-2"
+	gcp := &GCP{}
+
+	project, region, subnet, err := gcp.parseSubnet(subnetURI)
+
+	if project != "openshift-qe-shared-vpc" {
+		t.Fatalf("wrong project: %s", project)
+	}
+	if region != "us-central1" {
+		t.Fatalf("wrong region: %s", region)
+	}
+	if subnet != "installer-shared-vpc-subnet-2" {
+		t.Fatalf("wrong subnet: %s", subnet)
+	}
+	if err != nil {
+		t.Fatalf("did not expect err: %s", err)
+	}
+}
