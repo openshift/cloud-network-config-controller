@@ -133,6 +133,16 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 			ApplicationSecurityGroups:       applicationSecurityGroups,
 		},
 	}
+	for _, ipCfg := range ipConfigurations {
+		if ipCfg.PrivateIPAddress != nil && *ipCfg.PrivateIPAddress == ipc {
+			json, err := ipCfg.MarshalJSON()
+			if err != nil {
+				klog.Errorf("Failed to marshall the ip configuration: %v", err)
+			}
+			klog.Warningf("IP: %s is already assigned to node: %s with the ip configuration: %s", ipc, node.Name, json)
+			return AlreadyExistingIPError
+		}
+	}
 	ipConfigurations = append(ipConfigurations, newIPConfiguration)
 	networkInterface.IPConfigurations = &ipConfigurations
 	// Send the request
