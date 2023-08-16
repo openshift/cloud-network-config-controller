@@ -42,6 +42,7 @@ type Azure struct {
 	vmClient             compute.VirtualMachinesClient
 	virtualNetworkClient network.VirtualNetworksClient
 	networkClient        network.InterfacesClient
+	backendAddressPoolClient     network.LoadBalancerBackendAddressPoolsClient
 	nodeMapLock          sync.Mutex
 	nodeLockMap          map[string]*sync.Mutex
 }
@@ -98,6 +99,12 @@ func (a *Azure) initCredentials() error {
 	a.virtualNetworkClient = network.NewVirtualNetworksClientWithBaseURI(a.env.ResourceManagerEndpoint, subscriptionID)
 	a.virtualNetworkClient.Authorizer = authorizer
 	_ = a.virtualNetworkClient.AddToUserAgent(UserAgent)
+
+	a.backendAddressPoolClient = network.NewLoadBalancerBackendAddressPoolsClientWithBaseURI(
+		a.env.ResourceManagerEndpoint, subscriptionID)
+	a.backendAddressPoolClient.Authorizer = authorizer
+	_ = a.backendAddressPoolClient.AddToUserAgent(UserAgent)
+
 	return nil
 }
 
@@ -125,6 +132,52 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	ipConfigurations := *networkInterface.IPConfigurations
 	name := fmt.Sprintf("%s_%s", node.Name, ipc)
 	untrue := false
+
+	// In some Azure setups (Azure private, public ARO, private ARO) outbound connectivity is achieved through
+	// outbound rules tied to the backend address pool of the primary IP of the VM NIC. An Azure constraint
+	// forbids the creation of a secondary IP tied to such address pool and would result in
+	// OutboundRuleCannotBeUsedWithBackendAddressPoolThatIsReferencedBySecondaryIpConfigs.
+	// Work around it by not specifying the backend address pool when an outbound rule is set, even though
+	// that means preventing outbound connectivity to the egress IP, which will be able to reach the
+	// infrastructure subnet nonetheless. In public Azure clusters, outbound connectivity is achieved through
+	// UserDefinedRouting, which doesn't impose such constraints on secondary IPs.
+	loadBalancerBackendAddressPoolsArgument := (*networkInterface.IPConfigurations)[0].LoadBalancerBackendAddressPools
+	var attachedOutboundRule *network.SubResource
+	if (*networkInterface.IPConfigurations)[0].LoadBalancerBackendAddressPools != nil {
+	OuterLoop:
+		for _, ipconfig := range *networkInterface.IPConfigurations {
+			for _, pool := range *ipconfig.LoadBalancerBackendAddressPools {
+				if pool.ID == nil {
+					continue
+				}
+				// for some reason, the struct for the pool above is not entirely filled out:
+				//     BackendAddressPoolPropertiesFormat:(*network.BackendAddressPoolPropertiesFormat)(nil)
+				// Do a separate get for this pool in order to check whether there are any outbound rules
+				// attached to it
+				realPool, err := a.getBackendAddressPool(*pool.ID)
+				if err != nil {
+					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", *pool.Name, *pool.ID, err)
+				}
+				if realPool.BackendAddressPoolPropertiesFormat != nil {
+					if realPool.BackendAddressPoolPropertiesFormat.OutboundRule != nil {
+						loadBalancerBackendAddressPoolsArgument = nil
+						attachedOutboundRule = realPool.BackendAddressPoolPropertiesFormat.OutboundRule
+						break OuterLoop
+					}
+					if realPool.BackendAddressPoolPropertiesFormat.OutboundRules != nil {
+						loadBalancerBackendAddressPoolsArgument = nil
+						attachedOutboundRule = &(*realPool.BackendAddressPoolPropertiesFormat.OutboundRules)[0]
+						break OuterLoop
+					}
+				}
+			}
+		}
+	}
+	if loadBalancerBackendAddressPoolsArgument == nil {
+		klog.Warningf("Egress IP %s will have no outbound connectivity except for the infrastructure subnet: "+
+			"omitting backend address pool when adding secondary IP: it has an outbound rule already: %s",
+			ipc, *attachedOutboundRule.ID)
+	}
 	newIPConfiguration := network.InterfaceIPConfiguration{
 		Name: &name,
 		InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
@@ -132,7 +185,7 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 			PrivateIPAllocationMethod:       network.Static,
 			Subnet:                          (*networkInterface.IPConfigurations)[0].Subnet,
 			Primary:                         &untrue,
-			LoadBalancerBackendAddressPools: (*networkInterface.IPConfigurations)[0].LoadBalancerBackendAddressPools,
+			LoadBalancerBackendAddressPools: loadBalancerBackendAddressPoolsArgument,
 			ApplicationSecurityGroups:       applicationSecurityGroups,
 		},
 	}
@@ -351,6 +404,46 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 		return nil, NoNetworkInterfaceError
 	}
 	return networkInterfaces, nil
+}
+
+func splitObjectID(azureResourceID string) (resourceGroupName, loadBalancerName, backendAddressPoolName string) {
+	// example of an azureResourceID:
+	// "/subscriptions/53b8f551-f0fc-4bea-8cba-6d1fefd54c8a/resourceGroups/huirwang-debug1-2qh9t-rg/providers/Microsoft.Network/loadBalancers/huirwang-debug1-2qh9t/backendAddressPools/huirwang-debug1-2qh9t"
+
+	// Split the Azure resource ID into parts using "/"
+	parts := strings.Split(azureResourceID, "/")
+
+	// Iterate through the parts to find the relevant subIDs
+	for i, part := range parts {
+		switch part {
+		case "resourceGroups":
+			if i+1 < len(parts) {
+				resourceGroupName = parts[i+1]
+			}
+		case "loadBalancers":
+			if i+1 < len(parts) {
+				loadBalancerName = parts[i+1]
+			}
+		case "backendAddressPools":
+			if i+1 < len(parts) {
+				backendAddressPoolName = parts[i+1]
+			}
+		}
+	}
+	return
+}
+
+func (a *Azure) getBackendAddressPool(poolID string) (*network.BackendAddressPool, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
+	defer cancel()
+	resourceGroupName, loadBalancerName, backendAddressPoolName := splitObjectID(poolID)
+	backendAddressPool, err := a.backendAddressPoolClient.Get(ctx, resourceGroupName, loadBalancerName, backendAddressPoolName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve backend address pool for backendAddressPoolClient=%s, loadBalancerName=%s, backendAddressPoolName=%s: %w",
+			resourceGroupName, loadBalancerName, backendAddressPoolName, err)
+	}
+	return &backendAddressPool, nil
+
 }
 
 func (a *Azure) getNetworkInterface(id string) (network.Interface, error) {
