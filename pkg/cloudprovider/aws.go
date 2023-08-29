@@ -192,7 +192,12 @@ func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConf
 	if err != nil {
 		return nil, err
 	}
+	// For now, we only consider the first interface for EgressIP
 	networkInterface := networkInterfaces[0]
+	if networkInterface.NetworkInterfaceId == nil || *networkInterface.NetworkInterfaceId == "" ||
+		networkInterface.SubnetId == nil || *networkInterface.SubnetId == "" {
+		return nil, fmt.Errorf("error retrieving network interface with valid ids: %v", networkInterfaces)
+	}
 	config := &NodeEgressIPConfiguration{
 		Interface: *networkInterface.NetworkInterfaceId,
 	}
@@ -262,7 +267,11 @@ func (a *AWS) getSubnet(networkInterface *ec2.InstanceNetworkInterface) (*net.IP
 		return nil, nil, fmt.Errorf("error: cannot list ec2 subnets, err: %v", err)
 	}
 	if len(describeOutput.Subnets) > 1 {
-		return nil, nil, fmt.Errorf("error: multiple subnets found for the subnet ID: %s", *networkInterface.SubnetId)
+		subnetId := "<nil>"
+		if networkInterface.SubnetId != nil {
+			subnetId = *networkInterface.SubnetId
+		}
+		return nil, nil, fmt.Errorf("error: multiple subnets found for the subnet ID: %s", subnetId)
 	}
 
 	var v4Subnet, v6Subnet *net.IPNet
