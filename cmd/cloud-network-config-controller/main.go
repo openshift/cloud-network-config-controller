@@ -84,7 +84,7 @@ func main() {
 	}
 
 	rl, err := resourcelock.New(
-		resourcelock.ConfigMapsLeasesResourceLock,
+		resourcelock.LeasesResourceLock,
 		controllerNamespace,
 		resourceLockName,
 		kubeClient.CoreV1(),
