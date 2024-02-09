@@ -108,7 +108,7 @@ func (n *NodeController) SyncHandler(key string) error {
 	// Skip synchronization if this node is still uninitialized by the Cloud Controller Manager,
 	// meaning that it still has taint cloudproviderapi.TaintExternalCloudProvider.
 	if taintKeyExists(node.Spec.Taints, cloudproviderapi.TaintExternalCloudProvider) {
-		klog.V(5).Info("Taint '%s' found on node, skipping until the node is ready",
+		klog.V(5).Infof("Taint '%s' found on node, skipping until the node is ready",
 			cloudproviderapi.TaintExternalCloudProvider)
 		return nil
 	}
