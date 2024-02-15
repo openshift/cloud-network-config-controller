@@ -125,7 +125,7 @@ func main() {
 
 				featureGates, err := awaitEnabledFeatureGates(featureGateAccessor, 1*time.Minute)
 				if err != nil {
-					klog.Fatalf("Failed to get feature gates: %w", err)
+					klog.Fatalf("Failed to get feature gates: %v", err)
 				}
 
 				cloudNetworkClient, err := cloudnetworkclientset.NewForConfig(cfg)
@@ -268,7 +268,8 @@ func init() {
 	controllerNamespace = os.Getenv(controllerNamespaceEnvVar)
 	controllerName = os.Getenv(controllerNameEnvVar)
 	if controllerNamespace == "" || controllerName == "" {
-		klog.Exit("Controller ENV variables are empty: %q: %s, %q: %s, cannot initialize controller", controllerNamespaceEnvVar, controllerNamespace, controllerNameEnvVar, controllerName)
+		klog.Exitf("Controller ENV variables are empty: %q: %s, %q: %s, cannot initialize controller",
+			controllerNamespaceEnvVar, controllerNamespace, controllerNameEnvVar, controllerName)
 	}
 }
 
