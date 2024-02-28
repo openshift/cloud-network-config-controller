@@ -20,6 +20,9 @@ const (
 	// already in use by default and subtract from 100. See:
 	// https://cloud.google.com/vpc/docs/quota#per_instance .
 	defaultGCPPrivateIPCapacity = 100
+	// default universe domain
+	// https://github.com/openshift/cloud-network-config-controller/blob/dc255162b1442a1b85aa0b2ab37ed63245857476/vendor/golang.org/x/oauth2/google/default.go#L25
+	defaultUniverseDomain = "googleapis.com"
 )
 
 // GCP implements the API wrapper for talking
@@ -38,6 +41,14 @@ func (g *GCP) initCredentials() (err error) {
 	opts := []option.ClientOption{
 		option.WithCredentialsJSON([]byte(rawSecretData)),
 		option.WithUserAgent(UserAgent),
+	}
+	// If the UniverseDomain is not set, the client will try to retrieve it from the metadata server.
+	// https://github.com/openshift/cloud-network-config-controller/blob/dc255162b1442a1b85aa0b2ab37ed63245857476/vendor/golang.org/x/oauth2/google/default.go#L77
+	// This won't work in OpenShift because the CNCC pod cannot access the metadata service IP address (we block
+	// the access to 169.254.169.254 from cluster-networked pods).
+	// Set the UniverseDomain to the default value explicitly.
+	if !strings.Contains(rawSecretData, "universe_domain") {
+		opts = append(opts, option.WithUniverseDomain(defaultUniverseDomain))
 	}
 	if g.cfg.APIOverride != "" {
 		opts = append(opts, option.WithEndpoint(g.cfg.APIOverride))
