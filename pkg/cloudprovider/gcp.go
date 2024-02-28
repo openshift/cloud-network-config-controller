@@ -1,6 +1,7 @@
 package cloudprovider
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -33,22 +34,35 @@ type GCP struct {
 }
 
 func (g *GCP) initCredentials() (err error) {
-	rawSecretData, err := g.readSecretData("service_account.json")
+	secret, err := g.readSecretData("service_account.json")
 	if err != nil {
 		return err
 	}
+	secretData := []byte(secret)
 
-	opts := []option.ClientOption{
-		option.WithCredentialsJSON([]byte(rawSecretData)),
-		option.WithUserAgent(UserAgent),
-	}
 	// If the UniverseDomain is not set, the client will try to retrieve it from the metadata server.
 	// https://github.com/openshift/cloud-network-config-controller/blob/dc255162b1442a1b85aa0b2ab37ed63245857476/vendor/golang.org/x/oauth2/google/default.go#L77
 	// This won't work in OpenShift because the CNCC pod cannot access the metadata service IP address (we block
 	// the access to 169.254.169.254 from cluster-networked pods).
 	// Set the UniverseDomain to the default value explicitly.
-	if !strings.Contains(rawSecretData, "universe_domain") {
-		opts = append(opts, option.WithUniverseDomain(defaultUniverseDomain))
+	if !strings.Contains(secret, "universe_domain") {
+		// Using option.WithUniverseDomain() doesn't work because the value is not passed to the client.
+		// Modify the credentials json directly instead
+		var jsonMap map[string]interface{}
+		err := json.Unmarshal(secretData, &jsonMap)
+		if err != nil {
+			return fmt.Errorf("error: cannot decode google client secret, err: %v", err)
+		}
+		jsonMap["universe_domain"] = defaultUniverseDomain
+		secretData, err = json.Marshal(&jsonMap)
+		if err != nil {
+			return fmt.Errorf("error: cannot encode google client secret, err: %v", err)
+		}
+	}
+
+	opts := []option.ClientOption{
+		option.WithCredentialsJSON(secretData),
+		option.WithUserAgent(UserAgent),
 	}
 	if g.cfg.APIOverride != "" {
 		opts = append(opts, option.WithEndpoint(g.cfg.APIOverride))
