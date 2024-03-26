@@ -170,9 +170,9 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	// UserDefinedRouting, which doesn't impose such constraints on secondary IPs.
 	loadBalancerBackendAddressPoolsArgument := (*networkInterface.IPConfigurations)[0].LoadBalancerBackendAddressPools
 	var attachedOutboundRule *network.SubResource
-	if (*networkInterface.IPConfigurations)[0].LoadBalancerBackendAddressPools != nil {
-	OuterLoop:
-		for _, ipconfig := range *networkInterface.IPConfigurations {
+OuterLoop:
+	for _, ipconfig := range *networkInterface.IPConfigurations {
+		if ipconfig.LoadBalancerBackendAddressPools != nil {
 			for _, pool := range *ipconfig.LoadBalancerBackendAddressPools {
 				if pool.ID == nil {
 					continue
