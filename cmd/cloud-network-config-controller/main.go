@@ -10,6 +10,7 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	cloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
+	cloudnetworkscheme "github.com/openshift/client-go/cloudnetwork/clientset/versioned/scheme"
 	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	configinformers "github.com/openshift/client-go/config/informers/externalversions"
@@ -22,9 +23,9 @@ import (
 	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	"github.com/openshift/library-go/pkg/operator/events"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	kscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
@@ -78,7 +79,11 @@ func main() {
 		klog.Exitf("Error building kubernetes clientset: %s", err.Error())
 	}
 
-	platformStatus, err := getPlatformStatus(cfg)
+	scheme := runtime.NewScheme()
+	// Setup Scheme for all resources
+	setupScheme(scheme)
+
+	platformStatus, err := getPlatformStatus(cfg, scheme)
 	if err != nil {
 		klog.Exitf("Error getting platform status from cluster infrastructure: %s", err.Error())
 	}
@@ -334,13 +339,7 @@ func getReleaseVersion() string {
 	return releaseVersion
 }
 
-func getPlatformStatus(cfg *rest.Config) (*configv1.PlatformStatus, error) {
-	scheme := kscheme.Scheme
-	err := configv1.Install(scheme)
-	if err != nil {
-		return nil, fmt.Errorf("failed to install scheme: %w", err)
-	}
-
+func getPlatformStatus(cfg *rest.Config, scheme *runtime.Scheme) (*configv1.PlatformStatus, error) {
 	client, err := controllerclient.New(cfg, controllerclient.Options{Scheme: scheme})
 	if err != nil {
 		klog.Exitf("Error building controller runtime client: %s", err.Error())
@@ -354,4 +353,19 @@ func getPlatformStatus(cfg *rest.Config) (*configv1.PlatformStatus, error) {
 	}
 
 	return infra.Status.PlatformStatus, nil
+}
+
+// setupScheme serialises the scheme construction.
+func setupScheme(scheme *runtime.Scheme) {
+	// Setup scheme for all resources
+	// Setup Openshift config scheme
+	err := configv1.Install(scheme)
+	if err != nil {
+		klog.Fatalf("failed to install scheme: %v", err)
+	}
+	// Setup Openshift cloud network scheme
+	err = cloudnetworkscheme.AddToScheme(scheme)
+	if err != nil {
+		klog.Fatalf("failed to add APIs to scheme: %v", err)
+	}
 }

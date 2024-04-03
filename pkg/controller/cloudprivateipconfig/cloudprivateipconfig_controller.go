@@ -9,7 +9,6 @@ import (
 
 	cloudnetworkv1 "github.com/openshift/api/cloudnetwork/v1"
 	cloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
-	cloudnetworkscheme "github.com/openshift/client-go/cloudnetwork/clientset/versioned/scheme"
 	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1"
 	cloudnetworklisters "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
@@ -17,9 +16,7 @@ import (
 	controller "github.com/openshift/cloud-network-config-controller/pkg/controller"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	coreinformers "k8s.io/client-go/informers/core/v1"
-	"k8s.io/client-go/kubernetes/scheme"
 	corelisters "k8s.io/client-go/listers/core/v1"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -67,8 +64,6 @@ func NewCloudPrivateIPConfigController(
 	cloudNetworkClientset cloudnetworkclientset.Interface,
 	cloudPrivateIPConfigInformer cloudnetworkinformers.CloudPrivateIPConfigInformer,
 	nodeInformer coreinformers.NodeInformer) (*controller.CloudNetworkConfigController, error) {
-
-	utilruntime.Must(cloudnetworkscheme.AddToScheme(scheme.Scheme))
 
 	cloudPrivateIPConfigController := &CloudPrivateIPConfigController{
 		nodesLister:                nodeInformer.Lister(),
