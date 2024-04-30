@@ -195,7 +195,6 @@ func main() {
 						klog.Exitf("Error running CloudPrivateIPConfig controller: %s", err.Error())
 					}
 				}()
-				wg.Add(1)
 
 				// AWS and OpenStack use a configmap "kube-cloud-config" to keep track of additional
 				// data such as the ca-bundle.pem. Add a controller that restarts the operator if that configmap
@@ -222,7 +221,8 @@ func main() {
 						}
 					}()
 				}
-
+				
+				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					if err = nodeController.Run(stopCh); err != nil {
