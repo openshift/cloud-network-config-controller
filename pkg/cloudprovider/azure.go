@@ -191,7 +191,7 @@ OuterLoop:
 						attachedOutboundRule = realPool.BackendAddressPoolPropertiesFormat.OutboundRule
 						break OuterLoop
 					}
-					if realPool.BackendAddressPoolPropertiesFormat.OutboundRules != nil {
+					if realPool.BackendAddressPoolPropertiesFormat.OutboundRules != nil && len(*realPool.BackendAddressPoolPropertiesFormat.OutboundRules) > 0 {
 						loadBalancerBackendAddressPoolsArgument = nil
 						attachedOutboundRule = &(*realPool.BackendAddressPoolPropertiesFormat.OutboundRules)[0]
 						break OuterLoop
@@ -201,9 +201,14 @@ OuterLoop:
 		}
 	}
 	if loadBalancerBackendAddressPoolsArgument == nil {
+		outboundRuleStr := ""
+		if attachedOutboundRule != nil && attachedOutboundRule.ID != nil {
+			// https://issues.redhat.com/browse/OCPBUGS-33617 showed that there can be a rule without an ID...
+			outboundRuleStr = fmt.Sprintf(": %s", *attachedOutboundRule.ID)
+		}
 		klog.Warningf("Egress IP %s will have no outbound connectivity except for the infrastructure subnet: "+
-			"omitting backend address pool when adding secondary IP: it has an outbound rule already: %s",
-			ipc, *attachedOutboundRule.ID)
+			"omitting backend address pool when adding secondary IP: it has an outbound rule already%s",
+			ipc, outboundRuleStr)
 	}
 	newIPConfiguration := network.InterfaceIPConfiguration{
 		Name: &name,
