@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	apifeatures "github.com/openshift/api/features"
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	"net"
@@ -152,7 +153,7 @@ func NewCloudProviderClient(cfg CloudProviderConfig, platformStatus *configv1.Pl
 			CloudProvider:                cp,
 			platformStatus:               azurePlatformStatus,
 			nodeLockMap:                  make(map[string]*sync.Mutex),
-			azureWorkloadIdentityEnabled: featureGates.Enabled(configv1.FeatureGateAzureWorkloadIdentity),
+			azureWorkloadIdentityEnabled: featureGates.Enabled(apifeatures.FeatureGateAzureWorkloadIdentity),
 		}
 	case PlatformTypeAWS:
 		cloudProviderIntf = &AWS{
