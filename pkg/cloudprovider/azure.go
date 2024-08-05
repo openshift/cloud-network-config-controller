@@ -88,6 +88,10 @@ func (a *Azure) readAzureCredentialsConfig() (*azureCredentialsConfig, error) {
 	if err != nil {
 		klog.Infof("azure_federated_token_file not found in the secret: %v, falling back to AZURE_FEDERATED_TOKEN_FILE env", err)
 		cfg.tokenFile = os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+
+		if strings.TrimSpace(cfg.tokenFile) == "" {
+			cfg.tokenFile = "/var/run/secrets/openshift/serviceaccount/token"
+		}
 	}
 
 	cfg.subscriptionID, err = a.readSecretData("azure_subscription_id")
@@ -111,10 +115,6 @@ func (a *Azure) initCredentials() error {
 	cfg, err := a.readAzureCredentialsConfig()
 	if err != nil {
 		return err
-	}
-
-	if strings.TrimSpace(cfg.tokenFile) == "" {
-		cfg.tokenFile = "/var/run/secrets/openshift/serviceaccount/token"
 	}
 
 	a.resourceGroup = cfg.resourceGroup
@@ -585,7 +585,22 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		cred azcore.TokenCredential
 		err  error
 	)
-	if strings.TrimSpace(cfg.clientSecret) == "" {
+
+	// MSI Override for ARO HCP
+	msi := os.Getenv("AZURE_MSI_AUTHENTICATION")
+	if msi == "true" {
+		options := azidentity.ManagedIdentityCredentialOptions{
+			ClientOptions: azcore.ClientOptions{
+				Cloud: cloudConfig,
+			},
+		}
+
+		var err error
+		cred, err = azidentity.NewManagedIdentityCredential(&options)
+		if err != nil {
+			return nil, err
+		}
+	} else if strings.TrimSpace(cfg.clientSecret) == "" {
 		if a.azureWorkloadIdentityEnabled && strings.TrimSpace(cfg.tokenFile) != "" {
 			klog.Infof("Using workload identity authentication")
 			if cfg.clientID == "" || cfg.tenantID == "" {
@@ -600,20 +615,6 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 				TokenFilePath: cfg.tokenFile,
 			}
 			cred, err = azidentity.NewWorkloadIdentityCredential(&options)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			klog.Infof("Using managed identity authentication")
-			options := azidentity.ManagedIdentityCredentialOptions{
-				ClientOptions: azcore.ClientOptions{
-					Cloud: cloudConfig,
-				},
-			}
-			if cfg.clientID != "" {
-				options.ID = azidentity.ClientID(cfg.clientID)
-			}
-			cred, err = azidentity.NewManagedIdentityCredential(&options)
 			if err != nil {
 				return nil, err
 			}
