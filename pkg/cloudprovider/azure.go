@@ -51,50 +51,73 @@ type Azure struct {
 	azureWorkloadIdentityEnabled bool
 }
 
-func (a *Azure) initCredentials() error {
-	clientID, err := a.readSecretData("azure_client_id")
+type azureCredentialsConfig struct {
+	clientID       string
+	tenantID       string
+	subscriptionID string
+	resourceGroup  string
+	clientSecret   string
+	tokenFile      string
+}
+
+// readAzureCredentialsConfig reads the azure credentials' configuration.
+// Some of the returned fields can be empty, and it is up to the caller to ensure that all the required values are set.
+func (a *Azure) readAzureCredentialsConfig() (*azureCredentialsConfig, error) {
+	var cfg azureCredentialsConfig
+	var err error
+
+	cfg.clientID, err = a.readSecretData("azure_client_id")
 	if err != nil {
-		// Fallback to using client ID from env variable if not set.
-		clientID = os.Getenv("AZURE_CLIENT_ID")
-		if strings.TrimSpace(clientID) == "" {
-			return err
+		klog.Infof("azure_client_id not found in the secret: %v, falling back to AZURE_CLIENT_ID env", err)
+		cfg.clientID = os.Getenv("AZURE_CLIENT_ID")
+	}
+
+	cfg.tenantID, err = a.readSecretData("azure_tenant_id")
+	if err != nil {
+		klog.Infof("azure_tenant_id not found in the secret: %v, falling back to AZURE_TENANT_ID env", err)
+		cfg.tenantID = os.Getenv("AZURE_TENANT_ID")
+	}
+
+	cfg.clientSecret, err = a.readSecretData("azure_client_secret")
+	if err != nil {
+		klog.Infof("azure_client_secret not found in the secret: %v, falling back to AZURE_CLIENT_SECRET env", err)
+		cfg.clientSecret = os.Getenv("AZURE_CLIENT_SECRET")
+	}
+
+	cfg.tokenFile, err = a.readSecretData("azure_federated_token_file")
+	if err != nil {
+		klog.Infof("azure_federated_token_file not found in the secret: %v, falling back to AZURE_FEDERATED_TOKEN_FILE env", err)
+		cfg.tokenFile = os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+
+		if strings.TrimSpace(cfg.tokenFile) == "" {
+			cfg.tokenFile = "/var/run/secrets/openshift/serviceaccount/token"
 		}
 	}
-	tenantID, err := a.readSecretData("azure_tenant_id")
+
+	cfg.subscriptionID, err = a.readSecretData("azure_subscription_id")
 	if err != nil {
-		// Fallback to using tenant ID from env variable if not set.
-		tenantID = os.Getenv("AZURE_TENANT_ID")
-		if strings.TrimSpace(tenantID) == "" {
-			return err
-		}
+		return nil, fmt.Errorf("azure_subscription_id not found in the secret: %v", err)
 	}
-	clientSecret, err := a.readSecretData("azure_client_secret")
-	if err != nil {
-		clientSecret = os.Getenv("AZURE_CLIENT_SECRET")
-		// Skip validation; fallback to token workload identity token if env variable is also not set.
-		klog.Infof("Attempting to create workload identity client because azure_client_secret is missing")
-	}
-	subscriptionID, err := a.readSecretData("azure_subscription_id")
-	if err != nil {
-		return err
-	}
-	a.resourceGroup, err = a.readSecretData("azure_resourcegroup")
+
+	cfg.resourceGroup, err = a.readSecretData("azure_resourcegroup")
 	if err != nil {
 		if a.platformStatus != nil && len(strings.TrimSpace(a.platformStatus.ResourceGroupName)) > 0 {
 			klog.Infof("Attempting to use resource group from cluster infrastructure because azure_resourcegroup is missing")
-			a.resourceGroup = strings.TrimSpace(a.platformStatus.ResourceGroupName)
+			cfg.resourceGroup = strings.TrimSpace(a.platformStatus.ResourceGroupName)
 		} else {
-			return err
+			return nil, fmt.Errorf("azure_resourcegroup not found in the platform status and the secret: %v", err)
 		}
 	}
-	tokenFile, err := a.readSecretData("azure_federated_token_file")
+
+	return &cfg, nil
+}
+func (a *Azure) initCredentials() error {
+	cfg, err := a.readAzureCredentialsConfig()
 	if err != nil {
-		tokenFile = os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
-		if strings.TrimSpace(tokenFile) == "" {
-			// Use default value if no configuration is set
-			tokenFile = "/var/run/secrets/openshift/serviceaccount/token"
-		}
+		return err
 	}
+
+	a.resourceGroup = cfg.resourceGroup
 
 	// Pick the Azure "Environment", which is just a named set of API endpoints.
 	if a.cfg.APIOverride != "" {
@@ -110,25 +133,25 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
 	}
 
-	authorizer, err := a.getAuthorizer(a.env, clientID, clientSecret, tenantID, tokenFile)
+	authorizer, err := a.getAuthorizer(a.env, cfg)
 	if err != nil {
 		return err
 	}
 
-	a.vmClient = compute.NewVirtualMachinesClientWithBaseURI(a.env.ResourceManagerEndpoint, subscriptionID)
+	a.vmClient = compute.NewVirtualMachinesClientWithBaseURI(a.env.ResourceManagerEndpoint, cfg.subscriptionID)
 	a.vmClient.Authorizer = authorizer
 	_ = a.vmClient.AddToUserAgent(UserAgent)
 
-	a.networkClient = network.NewInterfacesClientWithBaseURI(a.env.ResourceManagerEndpoint, subscriptionID)
+	a.networkClient = network.NewInterfacesClientWithBaseURI(a.env.ResourceManagerEndpoint, cfg.subscriptionID)
 	a.networkClient.Authorizer = authorizer
 	_ = a.networkClient.AddToUserAgent(UserAgent)
 
-	a.virtualNetworkClient = network.NewVirtualNetworksClientWithBaseURI(a.env.ResourceManagerEndpoint, subscriptionID)
+	a.virtualNetworkClient = network.NewVirtualNetworksClientWithBaseURI(a.env.ResourceManagerEndpoint, cfg.subscriptionID)
 	a.virtualNetworkClient.Authorizer = authorizer
 	_ = a.virtualNetworkClient.AddToUserAgent(UserAgent)
 
 	a.backendAddressPoolClient = network.NewLoadBalancerBackendAddressPoolsClientWithBaseURI(
-		a.env.ResourceManagerEndpoint, subscriptionID)
+		a.env.ResourceManagerEndpoint, cfg.subscriptionID)
 	a.backendAddressPoolClient.Authorizer = authorizer
 	_ = a.backendAddressPoolClient.AddToUserAgent(UserAgent)
 
@@ -537,7 +560,7 @@ func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string
 	return *virtualNetwork.AddressSpace.AddressPrefixes, nil
 }
 
-func (a *Azure) getAuthorizer(env azureapi.Environment, clientID, clientSecret, tenantID, tokenFile string) (autorest.Authorizer, error) {
+func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsConfig) (autorest.Authorizer, error) {
 	var cloudConfig cloud.Configuration
 	switch env {
 	case azureapi.PublicCloud:
@@ -562,26 +585,51 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, clientID, clientSecret, 
 		cred azcore.TokenCredential
 		err  error
 	)
-	if a.azureWorkloadIdentityEnabled && strings.TrimSpace(clientSecret) == "" {
-		options := azidentity.WorkloadIdentityCredentialOptions{
+
+	// MSI Override for ARO HCP
+	msi := os.Getenv("AZURE_MSI_AUTHENTICATION")
+	if msi == "true" {
+		options := azidentity.ManagedIdentityCredentialOptions{
 			ClientOptions: azcore.ClientOptions{
 				Cloud: cloudConfig,
 			},
-			ClientID:      clientID,
-			TenantID:      tenantID,
-			TokenFilePath: tokenFile,
 		}
-		cred, err = azidentity.NewWorkloadIdentityCredential(&options)
+
+		var err error
+		cred, err = azidentity.NewManagedIdentityCredential(&options)
 		if err != nil {
 			return nil, err
 		}
+	} else if strings.TrimSpace(cfg.clientSecret) == "" {
+		if a.azureWorkloadIdentityEnabled && strings.TrimSpace(cfg.tokenFile) != "" {
+			klog.Infof("Using workload identity authentication")
+			if cfg.clientID == "" || cfg.tenantID == "" {
+				return nil, fmt.Errorf("clientID and tenantID are required in workload identity authentication")
+			}
+			options := azidentity.WorkloadIdentityCredentialOptions{
+				ClientOptions: azcore.ClientOptions{
+					Cloud: cloudConfig,
+				},
+				ClientID:      cfg.clientID,
+				TenantID:      cfg.tenantID,
+				TokenFilePath: cfg.tokenFile,
+			}
+			cred, err = azidentity.NewWorkloadIdentityCredential(&options)
+			if err != nil {
+				return nil, err
+			}
+		}
 	} else {
+		klog.Infof("Using client secret authentication")
+		if cfg.clientID == "" || cfg.tenantID == "" {
+			return nil, fmt.Errorf("clientID and tenantID are required in client secret authentication")
+		}
 		options := azidentity.ClientSecretCredentialOptions{
 			ClientOptions: azcore.ClientOptions{
 				Cloud: cloudConfig,
 			},
 		}
-		cred, err = azidentity.NewClientSecretCredential(tenantID, clientID, clientSecret, &options)
+		cred, err = azidentity.NewClientSecretCredential(cfg.tenantID, cfg.clientID, cfg.clientSecret, &options)
 		if err != nil {
 			return nil, err
 		}
