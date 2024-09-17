@@ -11,13 +11,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	novaservers "github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
-	neutronnetworks "github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
-	neutronports "github.com/gophercloud/gophercloud/openstack/networking/v2/ports"
-	"github.com/gophercloud/gophercloud/openstack/networking/v2/subnets"
-	neutronsubnets "github.com/gophercloud/gophercloud/openstack/networking/v2/subnets"
-	th "github.com/gophercloud/gophercloud/testhelper"
-	testclient "github.com/gophercloud/gophercloud/testhelper/client"
+	novaservers "github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
+	neutronnetworks "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
+	neutronports "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
+	neutronsubnets "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
+	th "github.com/gophercloud/gophercloud/v2/testhelper"
+	testclient "github.com/gophercloud/gophercloud/v2/testhelper/client"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -480,6 +480,7 @@ func portCreationHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	}
 	if !networkFound {
 		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("not found"))
 		return
 	}
 	// Now, check if the subnet exists
@@ -495,6 +496,7 @@ outer:
 	}
 	if !subnetFound {
 		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("not found"))
 		return
 	}
 
@@ -1125,7 +1127,7 @@ func TestAllowUnAllowIPAddressOnNeutronPort(t *testing.T) {
 		{
 			portID:    "9ab428d4-58f8-42d7-9672-90c3f5641f84", // non-existing port
 			ip:        net.ParseIP("192.0.2.20"),
-			errString: "Resource not found",
+			errString: "not found",
 		},
 		{
 			// Clean up so that a follow up test can start from a clean slate.
@@ -1243,7 +1245,7 @@ func TestReserveAndReleaseNeutronIPAddress(t *testing.T) {
 			ip:        net.ParseIP("2000::50"),
 			reserve:   true,
 			nodeName:  "node1",
-			errString: "Resource not found",
+			errString: "not found",
 		},
 		// Create a port on an invalid network.
 		{
@@ -1254,7 +1256,7 @@ func TestReserveAndReleaseNeutronIPAddress(t *testing.T) {
 			ip:        net.ParseIP("2000::51"),
 			reserve:   true,
 			nodeName:  "node1",
-			errString: "Resource not found",
+			errString: "not found",
 		},
 		// Try releasing a bound port.
 		{
@@ -1532,7 +1534,7 @@ func TestGetNovaServer(t *testing.T) {
 		},
 		{
 			id:        "9e5476bd-a4ec-4653-93d6-72c93aa682bb",
-			errString: "Resource not found",
+			errString: "not found",
 		},
 	}
 
