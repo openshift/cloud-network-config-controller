@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,11 +18,13 @@ import (
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
+	"github.com/fsnotify/fsnotify"
 	"github.com/jongio/azidext/go/azidext"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 	configv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/util/interrupt"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -33,6 +36,13 @@ const (
 	defaultAzurePrivateIPCapacity = 256
 	// defaultAzureOperationTimeout is the timeout for all Azure operations
 	defaultAzureOperationTimeout = 10 * time.Second
+
+	azureClientCertPath      = "AZURE_CLIENT_CERTIFICATE_PATH"
+	azureClientID            = "AZURE_CLIENT_ID"
+	azureClientSecret        = "AZURE_CLIENT_SECRET"
+	azureClientSendCertChain = "AZURE_CLIENT_SEND_CERTIFICATE_CHAIN"
+	azureFederatedTokenFile  = "AZURE_FEDERATED_TOKEN_FILE"
+	azureTenantID            = "AZURE_TENANT_ID"
 )
 
 // Azure implements the API wrapper for talking
@@ -88,10 +98,6 @@ func (a *Azure) readAzureCredentialsConfig() (*azureCredentialsConfig, error) {
 	if err != nil {
 		klog.Infof("azure_federated_token_file not found in the secret: %v, falling back to AZURE_FEDERATED_TOKEN_FILE env", err)
 		cfg.tokenFile = os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
-
-		if strings.TrimSpace(cfg.tokenFile) == "" {
-			cfg.tokenFile = "/var/run/secrets/openshift/serviceaccount/token"
-		}
 	}
 
 	cfg.subscriptionID, err = a.readSecretData("azure_subscription_id")
@@ -586,53 +592,49 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		err  error
 	)
 
-	// MSI Override for ARO HCP
-	msi := os.Getenv("AZURE_MSI_AUTHENTICATION")
-	if msi == "true" {
-		options := azidentity.ManagedIdentityCredentialOptions{
-			ClientOptions: azcore.ClientOptions{
-				Cloud: cloudConfig,
-			},
+	// For each of the following configuration values, if the environment variable is already set, use it over any
+	// configuration value: AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET. Otherwise, set the environment
+	// variable to the configuration value. The Azure SDK for Go function, NewDefaultAzureCredential, checks environment
+	// variables first.
+	if os.Getenv(azureTenantID) == "" {
+		if err := os.Setenv(azureTenantID, strings.TrimSpace(cfg.tenantID)); err != nil {
+			return nil, fmt.Errorf("failed to set environment variable %s: %w", azureTenantID, err)
 		}
+	}
+	if os.Getenv(azureClientID) == "" {
+		if err := os.Setenv(azureClientID, strings.TrimSpace(cfg.clientID)); err != nil {
+			return nil, fmt.Errorf("failed to set environment variable %s: %w", azureClientID, err)
+		}
+	}
+	if os.Getenv(azureClientSecret) == "" {
+		if err := os.Setenv(azureClientSecret, strings.TrimSpace(cfg.clientSecret)); err != nil {
+			return nil, fmt.Errorf("failed to set environment variable %s: %w", azureClientSecret, err)
+		}
+	}
+	if os.Getenv(azureFederatedTokenFile) == "" {
+		if err := os.Setenv(azureFederatedTokenFile, strings.TrimSpace(cfg.tokenFile)); err != nil {
+			return nil, fmt.Errorf("failed to set environment variable %s: %w", azureFederatedTokenFile, err)
+		}
+	}
+	if a.azureWorkloadIdentityEnabled {
+		if os.Getenv(azureClientSecret) == "" {
+			if os.Getenv(azureFederatedTokenFile) == "" {
+				if err := os.Setenv(azureFederatedTokenFile, "/var/run/secrets/openshift/serviceaccount/token"); err != nil {
+					return nil, fmt.Errorf("failed to set environment variable %s: %w", azureFederatedTokenFile, err)
+				}
+			}
+		}
+	}
 
-		var err error
-		cred, err = azidentity.NewManagedIdentityCredential(&options)
-		if err != nil {
-			return nil, err
-		}
-	} else if strings.TrimSpace(cfg.clientSecret) == "" {
-		if a.azureWorkloadIdentityEnabled && strings.TrimSpace(cfg.tokenFile) != "" {
-			klog.Infof("Using workload identity authentication")
-			if cfg.clientID == "" || cfg.tenantID == "" {
-				return nil, fmt.Errorf("clientID and tenantID are required in workload identity authentication")
-			}
-			options := azidentity.WorkloadIdentityCredentialOptions{
-				ClientOptions: azcore.ClientOptions{
-					Cloud: cloudConfig,
-				},
-				ClientID:      cfg.clientID,
-				TenantID:      cfg.tenantID,
-				TokenFilePath: cfg.tokenFile,
-			}
-			cred, err = azidentity.NewWorkloadIdentityCredential(&options)
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		klog.Infof("Using client secret authentication")
-		if cfg.clientID == "" || cfg.tenantID == "" {
-			return nil, fmt.Errorf("clientID and tenantID are required in client secret authentication")
-		}
-		options := azidentity.ClientSecretCredentialOptions{
-			ClientOptions: azcore.ClientOptions{
-				Cloud: cloudConfig,
-			},
-		}
-		cred, err = azidentity.NewClientSecretCredential(cfg.tenantID, cfg.clientID, cfg.clientSecret, &options)
-		if err != nil {
-			return nil, err
-		}
+	options := &azidentity.DefaultAzureCredentialOptions{
+		ClientOptions: azcore.ClientOptions{
+			Cloud: cloudConfig,
+		},
+	}
+
+	cred, err = azureCreds(options)
+	if err != nil {
+		return nil, err
 	}
 
 	scope := env.TokenAudience
@@ -657,4 +659,99 @@ func (a *Azure) getNodeLock(nodeName string) *sync.Mutex {
 
 func getNameFromResourceID(id string) string {
 	return id[strings.LastIndex(id, "/"):]
+}
+
+// azureCreds uses the Azure SDK for Go's standard default credential chain.It attempts to authenticate with each of
+// these credential types, in the following order, stopping when one provides a token:
+//   - [EnvironmentCredential]
+//   - [WorkloadIdentityCredential], if environment variable configuration is set by the Azure workload
+//     identity webhook. Use [WorkloadIdentityCredential] directly when not using the webhook or needing
+//     more control over its configuration.
+//   - [ManagedIdentityCredential]
+//   - [AzureCLICredential]
+func azureCreds(options *azidentity.DefaultAzureCredentialOptions) (*azidentity.DefaultAzureCredential, error) {
+	if err := os.Setenv(azureClientSendCertChain, "true"); err != nil {
+		return nil, fmt.Errorf("could not set %s", azureClientSendCertChain)
+	}
+
+	if certPath := os.Getenv(azureClientCertPath); certPath != "" {
+		// Set up a watch on our config file; if it changes, we should exit -
+		// (we don't have the ability to dynamically reload config changes).
+		stopCh := make(chan struct{})
+		err := interrupt.New(func(s os.Signal) {
+			_, _ = fmt.Fprintf(os.Stderr, "interrupt: Gracefully shutting down ...\n")
+			close(stopCh)
+		}).Run(func() error {
+			if err := watchForChanges(certPath, stopCh); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return azidentity.NewDefaultAzureCredential(options)
+}
+
+// watchForChanges closes stopCh if the configuration file changed.
+func watchForChanges(configPath string, stopCh chan struct{}) error {
+	configPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+
+	// Watch all symlinks for changes
+	p := configPath
+	maxDepth := 100
+	for depth := 0; depth < maxDepth; depth++ {
+		if err := watcher.Add(p); err != nil {
+			return err
+		}
+		klog.V(2).Infof("Watching config file %s for changes", p)
+
+		stat, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+
+		// configmaps are usually symlinks
+		if stat.Mode()&os.ModeSymlink > 0 {
+			p, err = filepath.EvalSymlinks(p)
+			if err != nil {
+				return err
+			}
+		} else {
+			break
+		}
+	}
+
+	go func() {
+		for {
+			select {
+			case <-stopCh:
+			case event, ok := <-watcher.Events:
+				if !ok {
+					klog.Errorf("failed to watch config file %s", p)
+					return
+				}
+				klog.V(2).Infof("Configuration file %s changed, exiting...", event.Name)
+				close(stopCh)
+				return
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					klog.Errorf("failed to watch config file %s", p)
+					return
+				}
+				klog.Errorf("fsnotify error: %v", err)
+			}
+		}
+	}()
+	return nil
 }
