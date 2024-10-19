@@ -10,6 +10,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.3.0
 	github.com/Azure/go-autorest/autorest v0.11.27
 	github.com/aws/aws-sdk-go v1.37.8
+	github.com/fsnotify/fsnotify v1.7.0
 	github.com/google/uuid v1.6.0
 	github.com/gophercloud/gophercloud v0.25.1-0.20220718160629-0721d75e876f
 	github.com/gophercloud/utils v0.0.0-20220307143606-8e7800759d16
@@ -52,7 +53,6 @@ require (
 	github.com/evanphx/json-patch v5.9.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.6.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect

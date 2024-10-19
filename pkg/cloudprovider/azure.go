@@ -20,6 +20,7 @@ import (
 	"github.com/jongio/azidext/go/azidext"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 	configv1 "github.com/openshift/api/config/v1"
+	"github.com/openshift/cloud-network-config-controller/pkg/filewatcher"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -586,17 +587,37 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		err  error
 	)
 
-	// MSI Override for ARO HCP
-	msi := os.Getenv("AZURE_MSI_AUTHENTICATION")
-	if msi == "true" {
-		options := azidentity.ManagedIdentityCredentialOptions{
+	// Managed Identity Override for ARO HCP
+	managedIdentityClientID := os.Getenv("ARO_HCP_MI_CLIENT_ID")
+	if managedIdentityClientID != "" {
+		klog.Info("Using client certification Azure authentication for ARO HCP")
+		options := &azidentity.ClientCertificateCredentialOptions{
 			ClientOptions: azcore.ClientOptions{
 				Cloud: cloudConfig,
 			},
+			SendCertificateChain: true,
 		}
 
-		var err error
-		cred, err = azidentity.NewManagedIdentityCredential(&options)
+		tenantID := os.Getenv("ARO_HCP_TENANT_ID")
+		certPath := os.Getenv("ARO_HCP_CLIENT_CERTIFICATE_PATH")
+
+		certData, err := os.ReadFile(certPath)
+		if err != nil {
+			return nil, fmt.Errorf(`failed to read certificate file "%s": %v`, certPath, err)
+		}
+
+		certs, key, err := azidentity.ParseCertificates(certData, []byte{})
+		if err != nil {
+			return nil, fmt.Errorf(`failed to parse certificate data "%s": %v`, certPath, err)
+		}
+
+		// Watch the certificate for changes; if the certificate changes, the pod will be restarted
+		err = filewatcher.WatchFileForChanges(certPath)
+		if err != nil {
+			return nil, err
+		}
+
+		cred, err = azidentity.NewClientCertificateCredential(tenantID, managedIdentityClientID, certs, key, options)
 		if err != nil {
 			return nil, err
 		}
