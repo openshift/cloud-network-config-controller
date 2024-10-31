@@ -1,6 +1,7 @@
 package cloudprovider
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -14,13 +15,13 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/gophercloud/gophercloud"
-	"github.com/gophercloud/gophercloud/openstack"
-	novaservers "github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
-	neutronports "github.com/gophercloud/gophercloud/openstack/networking/v2/ports"
-	neutronsubnets "github.com/gophercloud/gophercloud/openstack/networking/v2/subnets"
-	"github.com/gophercloud/gophercloud/pagination"
-	"github.com/gophercloud/utils/openstack/clientconfig"
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack"
+	novaservers "github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
+	neutronports "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
+	neutronsubnets "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
+	"github.com/gophercloud/gophercloud/v2/pagination"
+	"github.com/gophercloud/utils/v2/openstack/clientconfig"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
 	"gopkg.in/yaml.v2"
@@ -139,7 +140,7 @@ func (o *OpenStack) initCredentials() error {
 	}
 
 	// Now, authenticate.
-	err = openstack.Authenticate(provider, *opts)
+	err = openstack.Authenticate(context.TODO(), provider, *opts)
 	if err != nil {
 		return err
 	}
@@ -627,11 +628,11 @@ func (o *OpenStack) reserveNeutronIPAddress(s neutronsubnets.Subnet, ip net.IP, 
 		DeviceID:    expectedDeviceID,
 		Name:        fmt.Sprintf("egressip-%s", ip.String()),
 	}
-	p, err := neutronports.Create(o.neutronClient, opts).Extract()
+	p, err := neutronports.Create(context.TODO(), o.neutronClient, opts).Extract()
 
 	if err != nil {
 		// Let's check if error suggests that port with that IP already exists in that subnet.
-		if _, ok := err.(gophercloud.ErrDefault409); ok {
+		if gophercloud.ResponseCodeIs(err, http.StatusConflict) {
 			klog.Infof("Got conflict when trying to create reservation port with IP %s. Checking for an existing "+
 				"reservation port", ip.String())
 			// If so, let's get the port and check if it's our reservation port. It's possible we've created it earlier.
@@ -644,7 +645,7 @@ func (o *OpenStack) reserveNeutronIPAddress(s neutronsubnets.Subnet, ip net.IP, 
 				FixedIPs:    []neutronports.FixedIPOpts{{SubnetID: s.ID}, {IPAddress: ip.String()}},
 				DeviceOwner: egressIPTag,
 			}
-			page, err := neutronports.List(o.neutronClient, opts).AllPages()
+			page, err := neutronports.List(o.neutronClient, opts).AllPages(context.TODO())
 			if err != nil {
 				return nil, err
 			}
@@ -663,7 +664,7 @@ func (o *OpenStack) reserveNeutronIPAddress(s neutronsubnets.Subnet, ip net.IP, 
 				klog.Infof("Found reservation port %s for IP %s. Reusing it", p.ID, ip.String())
 				if p.DeviceID != expectedDeviceID {
 					// If not, we got to update it. We intend to replace the result with updated representation of the port.
-					p, err = neutronports.Update(o.neutronClient, p.ID, neutronports.UpdateOpts{DeviceID: &expectedDeviceID}).Extract()
+					p, err = neutronports.Update(context.TODO(), o.neutronClient, p.ID, neutronports.UpdateOpts{DeviceID: &expectedDeviceID}).Extract()
 					if err != nil {
 						return nil, err
 					}
@@ -695,7 +696,7 @@ func (o *OpenStack) releaseNeutronIPAddress(port neutronports.Port, serverID str
 			port.ID, serverID, port.DeviceOwner, port.DeviceID)
 	}
 
-	return neutronports.Delete(o.neutronClient, port.ID).ExtractErr()
+	return neutronports.Delete(context.TODO(), o.neutronClient, port.ID).ExtractErr()
 }
 
 // getNeutronPortWithIPAddressAndMachineID gets the neutron port with the given IP on the given subnet and
@@ -722,7 +723,7 @@ func (o *OpenStack) getNeutronPortWithIPAddressAndMachineID(s neutronsubnets.Sub
 		NetworkID: s.NetworkID,
 	}
 	pager := neutronports.List(o.neutronClient, portListOpts)
-	err := pager.EachPage(func(page pagination.Page) (bool, error) {
+	err := pager.EachPage(context.TODO(), func(ctx context.Context, page pagination.Page) (bool, error) {
 		portList, err := neutronports.ExtractPorts(page)
 		if err != nil {
 			// Something is wrong, stop searching and throw an error.
@@ -764,7 +765,7 @@ func (o *OpenStack) allowIPAddressOnNeutronPort(portID string, ip net.IP) error 
 
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Always get the most recent copy of this port.
-		p, err := neutronports.Get(o.neutronClient, portID).Extract()
+		p, err := neutronports.Get(context.TODO(), o.neutronClient, portID).Extract()
 		if err != nil {
 			return err
 		}
@@ -789,7 +790,7 @@ func (o *OpenStack) allowIPAddressOnNeutronPort(portID string, ip net.IP) error 
 			AllowedAddressPairs: &allowedPairs,
 			RevisionNumber:      &p.RevisionNumber,
 		}
-		_, err = neutronports.Update(o.neutronClient, p.ID, opts).Extract()
+		_, err = neutronports.Update(context.TODO(), o.neutronClient, p.ID, opts).Extract()
 
 		// If the update yielded an error of type "RevisionNumberConstraintFailed", then create a
 		// Conflict error. RetryOnConflict will react to this and will repeat the entire operation.
@@ -818,7 +819,7 @@ func (o *OpenStack) unallowIPAddressOnNeutronPort(portID string, ip net.IP) erro
 
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Always get the most recent copy of this port.
-		p, err := neutronports.Get(o.neutronClient, portID).Extract()
+		p, err := neutronports.Get(context.TODO(), o.neutronClient, portID).Extract()
 		if err != nil {
 			return err
 		}
@@ -846,7 +847,7 @@ func (o *OpenStack) unallowIPAddressOnNeutronPort(portID string, ip net.IP) erro
 			AllowedAddressPairs: &allowedPairs,
 			RevisionNumber:      &p.RevisionNumber,
 		}
-		_, err = neutronports.Update(o.neutronClient, p.ID, opts).Extract()
+		_, err = neutronports.Update(context.TODO(), o.neutronClient, p.ID, opts).Extract()
 
 		// If the update yielded an error of type "RevisionNumberConstraintFailed", then create a
 		// Conflict error. RetryOnConflict will react to this and will repeat the entire operation.
@@ -876,7 +877,7 @@ func (o *OpenStack) getNeutronSubnetsForNetwork(networkID string) ([]neutronsubn
 
 	opts := neutronsubnets.ListOpts{NetworkID: networkID}
 	pager := neutronsubnets.List(o.neutronClient, opts)
-	err := pager.EachPage(func(page pagination.Page) (bool, error) {
+	err := pager.EachPage(context.TODO(), func(ctx context.Context, page pagination.Page) (bool, error) {
 		subnetList, err := neutronsubnets.ExtractSubnets(page)
 		if err != nil {
 			return false, err
@@ -896,7 +897,7 @@ func (o *OpenStack) getNovaServer(serverID string) (*novaservers.Server, error) 
 		return nil, fmt.Errorf("serverID '%s' is not a valid UUID", serverID)
 	}
 
-	server, err := novaservers.Get(o.novaClient, serverID).Extract()
+	server, err := novaservers.Get(context.TODO(), o.novaClient, serverID).Extract()
 	if err != nil {
 		return nil, err
 	}
@@ -918,7 +919,7 @@ func (o *OpenStack) listNovaServerPorts(serverID string) ([]neutronports.Port, e
 	}
 
 	pager := neutronports.List(o.neutronClient, portListOpts)
-	err = pager.EachPage(func(page pagination.Page) (bool, error) {
+	err = pager.EachPage(context.TODO(), func(ctx context.Context, page pagination.Page) (bool, error) {
 		portList, err := neutronports.ExtractPorts(page)
 		if err != nil {
 			return false, err
