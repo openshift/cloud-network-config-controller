@@ -907,7 +907,7 @@ k8s.io/apimachinery/third_party/forked/golang/reflect
 # k8s.io/apiserver v0.31.1
 ## explicit; go 1.22.0
 k8s.io/apiserver/pkg/authentication/user
-# k8s.io/client-go v0.31.1
+# k8s.io/client-go v0.31.1 => github.com/vrutkovs/client-go v0.0.0-20241029114452-7f4b7d7b258d
 ## explicit; go 1.22.0
 k8s.io/client-go/applyconfigurations
 k8s.io/client-go/applyconfigurations/admissionregistration/v1
@@ -1306,3 +1306,4 @@ sigs.k8s.io/structured-merge-diff/v4/value
 ## explicit; go 1.12
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
+# k8s.io/client-go => github.com/vrutkovs/client-go v0.0.0-20241029114452-7f4b7d7b258d

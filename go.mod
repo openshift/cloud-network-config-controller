@@ -122,3 +122,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace k8s.io/client-go => github.com/vrutkovs/client-go v0.0.0-20241029114452-7f4b7d7b258d
