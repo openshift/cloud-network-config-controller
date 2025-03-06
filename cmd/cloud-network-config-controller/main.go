@@ -31,6 +31,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 	controllerclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -297,7 +298,7 @@ func createFeatureGateAccessor(ctx context.Context, cfg *rest.Config, operatorNa
 		Kind:       "Deployment",
 		Namespace:  namespace,
 		Name:       deploymentName,
-	})
+	}, clock.RealClock{})
 
 	configClient, err := configclient.NewForConfig(cfg)
 	if err != nil {
