@@ -207,7 +207,11 @@ OuterLoop:
 				// attached to it
 				realPool, err := a.getBackendAddressPool(*pool.ID)
 				if err != nil {
-					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", *pool.Name, *pool.ID, err)
+					poolName := ""
+					if pool.Name != nil {
+						poolName = *pool.Name
+					}
+					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", poolName, *pool.ID, err)
 				}
 				if realPool.BackendAddressPoolPropertiesFormat != nil {
 					if realPool.BackendAddressPoolPropertiesFormat.OutboundRule != nil {
