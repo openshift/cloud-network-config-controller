@@ -3,17 +3,20 @@ package cloudprovider
 import (
 	"context"
 	"fmt"
+	"k8s.io/utils/ptr"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
 	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/network/mgmt/network"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
@@ -44,7 +47,7 @@ type Azure struct {
 	platformStatus               *configv1.AzurePlatformStatus
 	resourceGroup                string
 	env                          azure.Environment
-	vmClient                     compute.VirtualMachinesClient
+	vmClient                     *armcompute.VirtualMachinesClient
 	virtualNetworkClient         network.VirtualNetworksClient
 	networkClient                network.InterfacesClient
 	backendAddressPoolClient     network.LoadBalancerBackendAddressPoolsClient
@@ -135,14 +138,21 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
 	}
 
-	authorizer, err := a.getAuthorizer(a.env, cfg)
+	authorizer, cred, cloudConfig, err := a.getAuthorizer(a.env, cfg)
 	if err != nil {
 		return err
 	}
 
-	a.vmClient = compute.NewVirtualMachinesClientWithBaseURI(a.env.ResourceManagerEndpoint, cfg.subscriptionID)
-	a.vmClient.Authorizer = authorizer
-	_ = a.vmClient.AddToUserAgent(UserAgent)
+	options := &arm.ClientOptions{
+		ClientOptions: policy.ClientOptions{
+			Cloud: cloudConfig,
+		},
+	}
+
+	a.vmClient, err = armcompute.NewVirtualMachinesClient(cfg.subscriptionID, cred, options)
+	if err != nil {
+		return fmt.Errorf("failed to initialize new VirtualMachinesClient: %w", err)
+	}
 
 	a.networkClient = network.NewInterfacesClientWithBaseURI(a.env.ResourceManagerEndpoint, cfg.subscriptionID)
 	a.networkClient.Authorizer = authorizer
@@ -400,35 +410,35 @@ func (a *Azure) getCapacity(networkInterface network.Interface, cloudPrivateIPsC
 //	providerID: azure:///subscriptions/ee2e2172-e246-4d4b-a72a-f62fbf924238/resourceGroups/ovn-qgwkn-rg/providers/Microsoft.Compute/virtualMachines/ovn-qgwkn-worker-canadacentral1-bskbf
 //
 // getInstance also validates that the instance has a (or several) NICs
-func (a *Azure) getInstance(node *corev1.Node) (*compute.VirtualMachine, error) {
+func (a *Azure) getInstance(node *corev1.Node) (*armcompute.VirtualMachine, error) {
 	providerData := strings.Split(node.Spec.ProviderID, "/")
 	if len(providerData) != 11 {
 		return nil, UnexpectedURIError(node.Spec.ProviderID)
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
 	defer cancel()
-	instance, err := a.vmClient.Get(ctx, a.resourceGroup, providerData[len(providerData)-1], "")
+	instance, err := a.vmClient.Get(ctx, a.resourceGroup, providerData[len(providerData)-1], nil)
 	if err != nil {
 		return nil, err
 	}
-	return &instance, nil
+	return &instance.VirtualMachine, nil
 }
 
 // getNetworkInterfaces returns a slice of network.Interface with the
 // primary one first, if it exists, else in the order assigned by Azure.
-func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]network.Interface, error) {
-	if instance.NetworkProfile == nil {
+func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]network.Interface, error) {
+	if instance.Properties == nil || instance.Properties.NetworkProfile == nil {
 		return nil, NoNetworkInterfaceError
 	}
-	if instance.NetworkProfile.NetworkInterfaces == nil || len(*instance.NetworkProfile.NetworkInterfaces) == 0 {
+	if instance.Properties.NetworkProfile.NetworkInterfaces == nil || len(instance.Properties.NetworkProfile.NetworkInterfaces) == 0 {
 		return nil, NoNetworkInterfaceError
 	}
 	networkInterfaces := []network.Interface{}
 	// Try to get the ID corresponding to the "primary" NIC and put that first
 	// in the slice. Do it like this because it's assumed to not be guaranteed
 	// to be first in the slice returned by the Azure API?
-	for _, netif := range *instance.NetworkProfile.NetworkInterfaces {
-		if netif.NetworkInterfaceReferenceProperties != nil && netif.Primary != nil && *netif.Primary {
+	for _, netif := range instance.Properties.NetworkProfile.NetworkInterfaces {
+		if netif.Properties != nil && netif.Properties.Primary != nil && ptr.Deref(netif.Properties.Primary, false) {
 			intf, err := a.getNetworkInterface(*netif.ID)
 			if err != nil {
 				return nil, err
@@ -438,8 +448,8 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 		}
 	}
 	// Get the rest and append that.
-	for _, netif := range *instance.NetworkProfile.NetworkInterfaces {
-		if netif.NetworkInterfaceReferenceProperties != nil && ((netif.Primary != nil && !*netif.Primary) || netif.Primary == nil) {
+	for _, netif := range instance.Properties.NetworkProfile.NetworkInterfaces {
+		if netif.Properties != nil && ((netif.Properties.Primary != nil && !*netif.Properties.Primary) || netif.Properties.Primary == nil) {
 			intf, err := a.getNetworkInterface(*netif.ID)
 			if err != nil {
 				return nil, err
@@ -450,8 +460,8 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 	if len(networkInterfaces) == 0 {
 		// Due to security restrictions access, the NIC's "primary" field is not enumerable.
 		// If we have NICs, then select the first in the list.
-		if len(*instance.NetworkProfile.NetworkInterfaces) > 0 {
-			intf, err := a.getNetworkInterface(*(*instance.NetworkProfile.NetworkInterfaces)[0].ID)
+		if len(instance.Properties.NetworkProfile.NetworkInterfaces) > 0 {
+			intf, err := a.getNetworkInterface(ptr.Deref(instance.Properties.NetworkProfile.NetworkInterfaces[0].ID, ""))
 			if err != nil {
 				return nil, err
 			}
@@ -562,31 +572,13 @@ func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string
 	return *virtualNetwork.AddressSpace.AddressPrefixes, nil
 }
 
-func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsConfig) (autorest.Authorizer, error) {
-	var cloudConfig cloud.Configuration
-	switch env {
-	case azureapi.PublicCloud:
-		cloudConfig = cloud.AzurePublic
-	case azureapi.USGovernmentCloud:
-		cloudConfig = cloud.AzureGovernment
-	case azureapi.ChinaCloud:
-		cloudConfig = cloud.AzureChina
-	default: // StackCloud ?
-		cloudConfig = cloud.Configuration{
-			ActiveDirectoryAuthorityHost: env.ActiveDirectoryEndpoint,
-			Services: map[cloud.ServiceName]cloud.ServiceConfiguration{
-				cloud.ResourceManager: {
-					Audience: env.TokenAudience,
-					Endpoint: env.ResourceManagerEndpoint,
-				},
-			},
-		}
-	}
-
+func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsConfig) (autorest.Authorizer, azcore.TokenCredential, cloud.Configuration, error) {
 	var (
 		cred azcore.TokenCredential
 		err  error
 	)
+
+	cloudConfig := ParseCloudEnvironment(env)
 
 	managedIdentityClientID := os.Getenv("ARO_HCP_MI_CLIENT_ID")
 	userAssignedIdentityCredentialsFilePath := os.Getenv("ARO_HCP_CLIENT_CREDENTIALS_PATH")
@@ -605,23 +597,23 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 
 		certData, err := os.ReadFile(certPath)
 		if err != nil {
-			return nil, fmt.Errorf(`failed to read certificate file "%s": %v`, certPath, err)
+			return nil, nil, cloud.Configuration{}, fmt.Errorf(`failed to read certificate file "%s": %v`, certPath, err)
 		}
 
 		certs, key, err := azidentity.ParseCertificates(certData, []byte{})
 		if err != nil {
-			return nil, fmt.Errorf(`failed to parse certificate data "%s": %v`, certPath, err)
+			return nil, nil, cloud.Configuration{}, fmt.Errorf(`failed to parse certificate data "%s": %v`, certPath, err)
 		}
 
 		// Watch the certificate for changes; if the certificate changes, the pod will be restarted
 		err = filewatcher.WatchFileForChanges(certPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, cloud.Configuration{}, err
 		}
 
 		cred, err = azidentity.NewClientCertificateCredential(tenantID, managedIdentityClientID, certs, key, options)
 		if err != nil {
-			return nil, err
+			return nil, nil, cloud.Configuration{}, err
 		}
 	} else if userAssignedIdentityCredentialsFilePath != "" {
 		// UserAssignedIdentityCredentials for managed Azure HCP
@@ -630,13 +622,13 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		}
 		cred, err = dataplane.NewUserAssignedIdentityCredential(context.Background(), userAssignedIdentityCredentialsFilePath, dataplane.WithClientOpts(clientOptions))
 		if err != nil {
-			return nil, err
+			return nil, nil, cloud.Configuration{}, err
 		}
 	} else if strings.TrimSpace(cfg.clientSecret) == "" {
 		if a.azureWorkloadIdentityEnabled && strings.TrimSpace(cfg.tokenFile) != "" {
 			klog.Infof("Using workload identity authentication")
 			if cfg.clientID == "" || cfg.tenantID == "" {
-				return nil, fmt.Errorf("clientID and tenantID are required in workload identity authentication")
+				return nil, nil, cloud.Configuration{}, fmt.Errorf("clientID and tenantID are required in workload identity authentication")
 			}
 			options := azidentity.WorkloadIdentityCredentialOptions{
 				ClientOptions: azcore.ClientOptions{
@@ -648,13 +640,13 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 			}
 			cred, err = azidentity.NewWorkloadIdentityCredential(&options)
 			if err != nil {
-				return nil, err
+				return nil, nil, cloud.Configuration{}, err
 			}
 		}
 	} else {
 		klog.Infof("Using client secret authentication")
 		if cfg.clientID == "" || cfg.tenantID == "" {
-			return nil, fmt.Errorf("clientID and tenantID are required in client secret authentication")
+			return nil, nil, cloud.Configuration{}, fmt.Errorf("clientID and tenantID are required in client secret authentication")
 		}
 		options := azidentity.ClientSecretCredentialOptions{
 			ClientOptions: azcore.ClientOptions{
@@ -663,7 +655,7 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		}
 		cred, err = azidentity.NewClientSecretCredential(cfg.tenantID, cfg.clientID, cfg.clientSecret, &options)
 		if err != nil {
-			return nil, err
+			return nil, nil, cloud.Configuration{}, err
 		}
 	}
 
@@ -673,7 +665,7 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 	}
 	authorizer := azidext.NewTokenCredentialAdapter(cred, []string{scope})
 
-	return authorizer, nil
+	return authorizer, cred, cloudConfig, nil
 }
 
 // getNodeLock retrieves node lock from nodeLockMap, If lock doesn't exist, then update map
@@ -689,4 +681,27 @@ func (a *Azure) getNodeLock(nodeName string) *sync.Mutex {
 
 func getNameFromResourceID(id string) string {
 	return id[strings.LastIndex(id, "/"):]
+}
+
+func ParseCloudEnvironment(env azureapi.Environment) cloud.Configuration {
+	var cloudConfig cloud.Configuration
+	switch env {
+	case azure.ChinaCloud:
+		cloudConfig = cloud.AzureChina
+	case azure.USGovernmentCloud:
+		cloudConfig = cloud.AzureGovernment
+	case azure.PublicCloud:
+		cloudConfig = cloud.AzurePublic
+	default: // AzureStackCloud
+		cloudConfig = cloud.Configuration{
+			ActiveDirectoryAuthorityHost: env.ActiveDirectoryEndpoint,
+			Services: map[cloud.ServiceName]cloud.ServiceConfiguration{
+				cloud.ResourceManager: {
+					Audience: env.TokenAudience,
+					Endpoint: env.ResourceManagerEndpoint,
+				},
+			},
+		}
+	}
+	return cloudConfig
 }
