@@ -21,13 +21,13 @@ cloud.google.com/go/auth/oauth2adapt
 cloud.google.com/go/compute/metadata
 # github.com/Azure/azure-sdk-for-go v53.1.0+incompatible
 ## explicit
-github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute
 github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/network/mgmt/network
 github.com/Azure/azure-sdk-for-go/services/network/mgmt/2018-11-01/network
 github.com/Azure/azure-sdk-for-go/version
 # github.com/Azure/azure-sdk-for-go/sdk/azcore v1.17.0
 ## explicit; go 1.18
 github.com/Azure/azure-sdk-for-go/sdk/azcore
+github.com/Azure/azure-sdk-for-go/sdk/azcore/arm
 github.com/Azure/azure-sdk-for-go/sdk/azcore/arm/internal/resource
 github.com/Azure/azure-sdk-for-go/sdk/azcore/arm/policy
 github.com/Azure/azure-sdk-for-go/sdk/azcore/arm/runtime
@@ -60,6 +60,11 @@ github.com/Azure/azure-sdk-for-go/sdk/internal/log
 github.com/Azure/azure-sdk-for-go/sdk/internal/poller
 github.com/Azure/azure-sdk-for-go/sdk/internal/temporal
 github.com/Azure/azure-sdk-for-go/sdk/internal/uuid
+# github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute v1.0.0
+## explicit; go 1.18
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute
+# github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0
+## explicit; go 1.18
 # github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets v1.3.1
 ## explicit; go 1.18
 github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets
