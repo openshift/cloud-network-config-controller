@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/network/mgmt/network"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
@@ -52,7 +51,7 @@ type Azure struct {
 	vmClient                     *armcompute.VirtualMachinesClient
 	virtualNetworkClient         *armnetwork.VirtualNetworksClient
 	networkClient                *armnetwork.InterfacesClient
-	backendAddressPoolClient     network.LoadBalancerBackendAddressPoolsClient
+	backendAddressPoolClient     *armnetwork.LoadBalancerBackendAddressPoolsClient
 	nodeMapLock                  sync.Mutex
 	nodeLockMap                  map[string]*sync.Mutex
 	azureWorkloadIdentityEnabled bool
@@ -140,7 +139,7 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
 	}
 
-	authorizer, cred, cloudConfig, err := a.getAuthorizer(a.env, cfg)
+	_, cred, cloudConfig, err := a.getAuthorizer(a.env, cfg)
 	if err != nil {
 		return err
 	}
@@ -166,10 +165,10 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize new VirtualNetworksClient: %w", err)
 	}
 
-	a.backendAddressPoolClient = network.NewLoadBalancerBackendAddressPoolsClientWithBaseURI(
-		a.env.ResourceManagerEndpoint, cfg.subscriptionID)
-	a.backendAddressPoolClient.Authorizer = authorizer
-	_ = a.backendAddressPoolClient.AddToUserAgent(UserAgent)
+	a.backendAddressPoolClient, err = armnetwork.NewLoadBalancerBackendAddressPoolsClient(cfg.subscriptionID, cred, options)
+	if err != nil {
+		return fmt.Errorf("failed to initialize new LoadBalancerBackendAddressPoolsClient: %w", err)
+	}
 
 	return nil
 }
@@ -211,7 +210,7 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	// infrastructure subnet nonetheless. In public Azure clusters, outbound connectivity is achieved through
 	// UserDefinedRouting, which doesn't impose such constraints on secondary IPs.
 	loadBalancerBackendAddressPoolsArgument := networkInterface.Properties.IPConfigurations[0].Properties.LoadBalancerBackendAddressPools
-	var attachedOutboundRule *network.SubResource
+	var attachedOutboundRule *armnetwork.SubResource
 OuterLoop:
 	for _, ipconfig := range networkInterface.Properties.IPConfigurations {
 		if ipconfig.Properties.LoadBalancerBackendAddressPools != nil {
@@ -227,15 +226,15 @@ OuterLoop:
 				if err != nil {
 					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", *pool.Name, *pool.ID, err)
 				}
-				if realPool.BackendAddressPoolPropertiesFormat != nil {
-					if realPool.BackendAddressPoolPropertiesFormat.OutboundRule != nil {
+				if realPool.Properties.LoadBalancerBackendAddresses != nil && len(realPool.Properties.LoadBalancerBackendAddresses) > 0 {
+					if realPool.Properties.OutboundRule != nil {
 						loadBalancerBackendAddressPoolsArgument = nil
-						attachedOutboundRule = realPool.BackendAddressPoolPropertiesFormat.OutboundRule
+						attachedOutboundRule = realPool.Properties.OutboundRule
 						break OuterLoop
 					}
-					if realPool.BackendAddressPoolPropertiesFormat.OutboundRules != nil && len(*realPool.BackendAddressPoolPropertiesFormat.OutboundRules) > 0 {
+					if realPool.Properties.OutboundRules != nil && len(realPool.Properties.OutboundRules) > 0 {
 						loadBalancerBackendAddressPoolsArgument = nil
-						attachedOutboundRule = &(*realPool.BackendAddressPoolPropertiesFormat.OutboundRules)[0]
+						attachedOutboundRule = (realPool.Properties.OutboundRules)[0]
 						break OuterLoop
 					}
 				}
@@ -521,16 +520,16 @@ func splitObjectID(azureResourceID string) (resourceGroupName, loadBalancerName,
 	return
 }
 
-func (a *Azure) getBackendAddressPool(poolID string) (*network.BackendAddressPool, error) {
+func (a *Azure) getBackendAddressPool(poolID string) (*armnetwork.BackendAddressPool, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
 	defer cancel()
 	resourceGroupName, loadBalancerName, backendAddressPoolName := splitObjectID(poolID)
-	backendAddressPool, err := a.backendAddressPoolClient.Get(ctx, resourceGroupName, loadBalancerName, backendAddressPoolName)
+	response, err := a.backendAddressPoolClient.Get(ctx, resourceGroupName, loadBalancerName, backendAddressPoolName, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve backend address pool for backendAddressPoolClient=%s, loadBalancerName=%s, backendAddressPoolName=%s: %w",
 			resourceGroupName, loadBalancerName, backendAddressPoolName, err)
 	}
-	return &backendAddressPool, nil
+	return &response.BackendAddressPool, nil
 
 }
 
