@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	compute "github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
+	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
 	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/network/mgmt/network"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
@@ -17,6 +17,7 @@ import (
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
+	"github.com/Azure/msi-dataplane/pkg/dataplane"
 	"github.com/jongio/azidext/go/azidext"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 	configv1 "github.com/openshift/api/config/v1"
@@ -587,9 +588,10 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		err  error
 	)
 
-	// Managed Identity Override for ARO HCP
 	managedIdentityClientID := os.Getenv("ARO_HCP_MI_CLIENT_ID")
+	userAssignedIdentityCredentialsFilePath := os.Getenv("ARO_HCP_CLIENT_CREDENTIALS_PATH")
 	if managedIdentityClientID != "" {
+		// Managed Identity Override for ARO HCP
 		klog.Info("Using client certification Azure authentication for ARO HCP")
 		options := &azidentity.ClientCertificateCredentialOptions{
 			ClientOptions: azcore.ClientOptions{
@@ -618,6 +620,15 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		}
 
 		cred, err = azidentity.NewClientCertificateCredential(tenantID, managedIdentityClientID, certs, key, options)
+		if err != nil {
+			return nil, err
+		}
+	} else if userAssignedIdentityCredentialsFilePath != "" {
+		// UserAssignedIdentityCredentials for managed Azure HCP
+		clientOptions := azcore.ClientOptions{
+			Cloud: cloudConfig,
+		}
+		cred, err = dataplane.NewUserAssignedIdentityCredential(context.Background(), userAssignedIdentityCredentialsFilePath, dataplane.WithClientOpts(clientOptions))
 		if err != nil {
 			return nil, err
 		}
