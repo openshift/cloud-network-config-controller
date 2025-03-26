@@ -50,7 +50,7 @@ type Azure struct {
 	resourceGroup                string
 	env                          azure.Environment
 	vmClient                     *armcompute.VirtualMachinesClient
-	virtualNetworkClient         network.VirtualNetworksClient
+	virtualNetworkClient         *armnetwork.VirtualNetworksClient
 	networkClient                *armnetwork.InterfacesClient
 	backendAddressPoolClient     network.LoadBalancerBackendAddressPoolsClient
 	nodeMapLock                  sync.Mutex
@@ -161,9 +161,10 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize new InterfacesClient: %w", err)
 	}
 
-	a.virtualNetworkClient = network.NewVirtualNetworksClientWithBaseURI(a.env.ResourceManagerEndpoint, cfg.subscriptionID)
-	a.virtualNetworkClient.Authorizer = authorizer
-	_ = a.virtualNetworkClient.AddToUserAgent(UserAgent)
+	a.virtualNetworkClient, err = armnetwork.NewVirtualNetworksClient(cfg.subscriptionID, cred, options)
+	if err != nil {
+		return fmt.Errorf("failed to initialize new VirtualNetworksClient: %w", err)
+	}
 
 	a.backendAddressPoolClient = network.NewLoadBalancerBackendAddressPoolsClientWithBaseURI(
 		a.env.ResourceManagerEndpoint, cfg.subscriptionID)
@@ -387,9 +388,12 @@ func (a *Azure) getSubnet(networkInterface armnetwork.Interface) (*net.IPNet, *n
 	}
 	var v4Subnet, v6Subnet *net.IPNet
 	for _, addressPrefix := range addressPrefixes {
-		_, subnet, err := net.ParseCIDR(addressPrefix)
+		if addressPrefix == nil {
+			return nil, nil, fmt.Errorf("error retrieving associated address prefix")
+		}
+		_, subnet, err := net.ParseCIDR(*addressPrefix)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error: unable to parse found AddressPrefix: %s for network interface, err: %v", addressPrefix, err)
+			return nil, nil, fmt.Errorf("error: unable to parse found AddressPrefix: %s for network interface, err: %v", *addressPrefix, err)
 		}
 		if utilnet.IsIPv6CIDR(subnet) {
 			if v6Subnet == nil {
@@ -551,7 +555,7 @@ func (a *Azure) getNetworkResourceGroupAndSubnetAndNetnames(subnetID string) (st
 	return providerData[4], providerData[len(providerData)-3], providerData[len(providerData)-1], nil
 }
 
-func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]string, error) {
+func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]*string, error) {
 	var virtualNetworkResourceGroup string
 	var virtualNetworkName string
 	var subnetName string
@@ -567,7 +571,7 @@ func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]str
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
 	defer cancel()
-	virtualNetwork, err := a.virtualNetworkClient.Get(ctx, virtualNetworkResourceGroup, virtualNetworkName, "")
+	virtualNetwork, err := a.virtualNetworkClient.Get(ctx, virtualNetworkResourceGroup, virtualNetworkName, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving subnet IP configuration, err: %v", err)
 	}
@@ -575,22 +579,22 @@ func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]str
 	// instead of virtualNetwork.AddressSpace.AddressPrefixes which only contains the main subnet's
 	// address prefix.
 	// FIXME: This might not work for IPv6.
-	if virtualNetwork.Subnets != nil {
-		for _, vns := range *virtualNetwork.Subnets {
-			if vns.Name != nil && vns.AddressPrefix != nil &&
+	if virtualNetwork.Properties != nil && virtualNetwork.Properties.Subnets != nil {
+		for _, vns := range virtualNetwork.Properties.Subnets {
+			if vns.Name != nil && vns.Properties.AddressPrefix != nil &&
 				*vns.Name == subnetName {
-				return []string{*vns.AddressPrefix}, nil
+				return []*string{vns.Properties.AddressPrefix}, nil
 			}
 		}
 	}
 
-	if virtualNetwork.AddressSpace == nil {
+	if virtualNetwork.Properties.AddressSpace == nil {
 		return nil, fmt.Errorf("nil subnet address space")
 	}
-	if virtualNetwork.AddressSpace.AddressPrefixes == nil || len(*virtualNetwork.AddressSpace.AddressPrefixes) == 0 {
+	if virtualNetwork.Properties.AddressSpace.AddressPrefixes == nil || len(virtualNetwork.Properties.AddressSpace.AddressPrefixes) == 0 {
 		return nil, fmt.Errorf("no subnet address prefixes defined")
 	}
-	return *virtualNetwork.AddressSpace.AddressPrefixes, nil
+	return virtualNetwork.Properties.AddressSpace.AddressPrefixes, nil
 }
 
 func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsConfig) (autorest.Authorizer, azcore.TokenCredential, cloud.Configuration, error) {
