@@ -3,6 +3,7 @@ package cloudprovider
 import (
 	"context"
 	"fmt"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"k8s.io/utils/ptr"
 	"net"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
@@ -49,7 +51,7 @@ type Azure struct {
 	env                          azure.Environment
 	vmClient                     *armcompute.VirtualMachinesClient
 	virtualNetworkClient         network.VirtualNetworksClient
-	networkClient                network.InterfacesClient
+	networkClient                *armnetwork.InterfacesClient
 	backendAddressPoolClient     network.LoadBalancerBackendAddressPoolsClient
 	nodeMapLock                  sync.Mutex
 	nodeLockMap                  map[string]*sync.Mutex
@@ -154,9 +156,10 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize new VirtualMachinesClient: %w", err)
 	}
 
-	a.networkClient = network.NewInterfacesClientWithBaseURI(a.env.ResourceManagerEndpoint, cfg.subscriptionID)
-	a.networkClient.Authorizer = authorizer
-	_ = a.networkClient.AddToUserAgent(UserAgent)
+	a.networkClient, err = armnetwork.NewInterfacesClient(cfg.subscriptionID, cred, options)
+	if err != nil {
+		return fmt.Errorf("failed to initialize new InterfacesClient: %w", err)
+	}
 
 	a.virtualNetworkClient = network.NewVirtualNetworksClientWithBaseURI(a.env.ResourceManagerEndpoint, cfg.subscriptionID)
 	a.virtualNetworkClient.Authorizer = authorizer
@@ -184,14 +187,17 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	if err != nil {
 		return err
 	}
-	applicationSecurityGroups := (*networkInterfaces[0].IPConfigurations)[0].InterfaceIPConfigurationPropertiesFormat.ApplicationSecurityGroups
+	if networkInterfaces[0].Properties == nil {
+		return fmt.Errorf("nil network interface properties")
+	}
+	applicationSecurityGroups := networkInterfaces[0].Properties.IPConfigurations[0].Properties.ApplicationSecurityGroups
 
 	// Perform the operation against the first interface listed, which will be
 	// the primary interface (if it's defined as such) or the first one returned
 	// following the order Azure specifies.
 	networkInterface := networkInterfaces[0]
 	// Assign the IP
-	ipConfigurations := *networkInterface.IPConfigurations
+	ipConfigurations := networkInterface.Properties.IPConfigurations
 	name := fmt.Sprintf("%s_%s", node.Name, ipc)
 	untrue := false
 
@@ -203,12 +209,12 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	// that means preventing outbound connectivity to the egress IP, which will be able to reach the
 	// infrastructure subnet nonetheless. In public Azure clusters, outbound connectivity is achieved through
 	// UserDefinedRouting, which doesn't impose such constraints on secondary IPs.
-	loadBalancerBackendAddressPoolsArgument := (*networkInterface.IPConfigurations)[0].LoadBalancerBackendAddressPools
+	loadBalancerBackendAddressPoolsArgument := networkInterface.Properties.IPConfigurations[0].Properties.LoadBalancerBackendAddressPools
 	var attachedOutboundRule *network.SubResource
 OuterLoop:
-	for _, ipconfig := range *networkInterface.IPConfigurations {
-		if ipconfig.LoadBalancerBackendAddressPools != nil {
-			for _, pool := range *ipconfig.LoadBalancerBackendAddressPools {
+	for _, ipconfig := range networkInterface.Properties.IPConfigurations {
+		if ipconfig.Properties.LoadBalancerBackendAddressPools != nil {
+			for _, pool := range ipconfig.Properties.LoadBalancerBackendAddressPools {
 				if pool.ID == nil {
 					continue
 				}
@@ -245,19 +251,19 @@ OuterLoop:
 			"omitting backend address pool when adding secondary IP: it has an outbound rule already%s",
 			ipc, outboundRuleStr)
 	}
-	newIPConfiguration := network.InterfaceIPConfiguration{
+	newIPConfiguration := &armnetwork.InterfaceIPConfiguration{
 		Name: &name,
-		InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
+		Properties: &armnetwork.InterfaceIPConfigurationPropertiesFormat{
 			PrivateIPAddress:                &ipc,
-			PrivateIPAllocationMethod:       network.Static,
-			Subnet:                          (*networkInterface.IPConfigurations)[0].Subnet,
+			PrivateIPAllocationMethod:       ptr.To(armnetwork.IPAllocationMethodStatic),
+			Subnet:                          networkInterface.Properties.IPConfigurations[0].Properties.Subnet,
 			Primary:                         &untrue,
 			LoadBalancerBackendAddressPools: loadBalancerBackendAddressPoolsArgument,
 			ApplicationSecurityGroups:       applicationSecurityGroups,
 		},
 	}
 	for _, ipCfg := range ipConfigurations {
-		if ipCfg.PrivateIPAddress != nil && *ipCfg.PrivateIPAddress == ipc {
+		if ptr.Deref(ipCfg.Properties.PrivateIPAddress, "") == ipc {
 			json, err := ipCfg.MarshalJSON()
 			if err != nil {
 				klog.Errorf("Failed to marshall the ip configuration: %v", err)
@@ -267,13 +273,13 @@ OuterLoop:
 		}
 	}
 	ipConfigurations = append(ipConfigurations, newIPConfiguration)
-	networkInterface.IPConfigurations = &ipConfigurations
+	networkInterface.Properties.IPConfigurations = ipConfigurations
 	// Send the request
-	result, err := a.createOrUpdate(networkInterface)
+	poller, err := a.createOrUpdate(networkInterface)
 	if err != nil {
 		return err
 	}
-	return a.waitForCompletion(result)
+	return a.waitForCompletion(poller)
 }
 
 func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
@@ -294,10 +300,13 @@ func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	// following the order Azure specifies.
 	networkInterface := networkInterfaces[0]
 	// Release the IP
-	keepIPConfiguration := []network.InterfaceIPConfiguration{}
+	keepIPConfiguration := []*armnetwork.InterfaceIPConfiguration{}
 	ipAssigned := false
-	for _, ipConfiguration := range *networkInterface.IPConfigurations {
-		if assignedIP := net.ParseIP(*ipConfiguration.PrivateIPAddress); assignedIP != nil && !assignedIP.Equal(ip) {
+	if networkInterface.Properties == nil {
+		return fmt.Errorf("nil network interface properties")
+	}
+	for _, ipConfiguration := range networkInterface.Properties.IPConfigurations {
+		if assignedIP := net.ParseIP(ptr.Deref(ipConfiguration.Properties.PrivateIPAddress, "")); assignedIP != nil && !assignedIP.Equal(ip) {
 			keepIPConfiguration = append(keepIPConfiguration, ipConfiguration)
 		} else if assignedIP != nil && assignedIP.Equal(ip) {
 			ipAssigned = true
@@ -307,13 +316,13 @@ func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	if !ipAssigned {
 		return NonExistingIPError
 	}
-	networkInterface.IPConfigurations = &keepIPConfiguration
+	networkInterface.Properties.IPConfigurations = keepIPConfiguration
 	// Send the request
-	result, err := a.createOrUpdate(networkInterface)
+	poller, err := a.createOrUpdate(networkInterface)
 	if err != nil {
 		return err
 	}
-	return a.waitForCompletion(result)
+	return a.waitForCompletion(poller)
 }
 
 func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
@@ -350,20 +359,28 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPCo
 	return []*NodeEgressIPConfiguration{config}, nil
 }
 
-func (a *Azure) createOrUpdate(networkInterface network.Interface) (network.InterfacesCreateOrUpdateFuture, error) {
+func (a *Azure) createOrUpdate(networkInterface armnetwork.Interface) (*runtime.Poller[armnetwork.InterfacesClientCreateOrUpdateResponse], error) {
 	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
 	defer cancel()
-	return a.networkClient.CreateOrUpdate(ctx, a.resourceGroup, *networkInterface.Name, networkInterface)
+	poller, err := a.networkClient.BeginCreateOrUpdate(ctx, a.resourceGroup, ptr.Deref(networkInterface.Name, ""), networkInterface, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create or update network interface: %v, err: %v", *networkInterface.Name, err)
+	}
+
+	return poller, nil
 }
 
-func (a *Azure) waitForCompletion(result network.InterfacesCreateOrUpdateFuture) error {
+func (a *Azure) waitForCompletion(poller *runtime.Poller[armnetwork.InterfacesClientCreateOrUpdateResponse]) error {
 	// No specified timeout for this operation, because a valid value doesn't
 	// seem possible to estimate. Note: Azure has some defaults defined here:
-	// https://github.com/Azure/go-autorest/blob/master/autorest/client.go#L32-L44
-	return result.WaitForCompletionRef(context.TODO(), a.networkClient.Client)
+	// https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime@v1.17.0#Poller.PollUntilDone
+	if _, err := poller.PollUntilDone(context.TODO(), nil); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (a *Azure) getSubnet(networkInterface network.Interface) (*net.IPNet, *net.IPNet, error) {
+func (a *Azure) getSubnet(networkInterface armnetwork.Interface) (*net.IPNet, *net.IPNet, error) {
 	addressPrefixes, err := a.getAddressPrefixes(networkInterface)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error retrieving associated address prefix for network interface, err: %v", err)
@@ -390,10 +407,10 @@ func (a *Azure) getSubnet(networkInterface network.Interface) (*net.IPNet, *net.
 // We need to retrieve the amounts assigned to the node by default and subtract
 // that from the default 256 value. Note: there is also a "Private IP addresses
 // per virtual network" quota, but that's 65.536, so we can skip that.
-func (a *Azure) getCapacity(networkInterface network.Interface, cloudPrivateIPsCount int) int {
+func (a *Azure) getCapacity(networkInterface armnetwork.Interface, cloudPrivateIPsCount int) int {
 	currentIPv4Usage, currentIPv6Usage := 0, 0
-	for _, ipConfiguration := range *networkInterface.IPConfigurations {
-		if assignedIP := net.ParseIP(*ipConfiguration.PrivateIPAddress); assignedIP != nil {
+	for _, ipConfiguration := range networkInterface.Properties.IPConfigurations {
+		if assignedIP := net.ParseIP(ptr.Deref(ipConfiguration.Properties.PrivateIPAddress, "")); assignedIP != nil {
 			if utilnet.IsIPv4(assignedIP) {
 				currentIPv4Usage++
 			} else {
@@ -426,14 +443,14 @@ func (a *Azure) getInstance(node *corev1.Node) (*armcompute.VirtualMachine, erro
 
 // getNetworkInterfaces returns a slice of network.Interface with the
 // primary one first, if it exists, else in the order assigned by Azure.
-func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]network.Interface, error) {
+func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]armnetwork.Interface, error) {
 	if instance.Properties == nil || instance.Properties.NetworkProfile == nil {
 		return nil, NoNetworkInterfaceError
 	}
 	if instance.Properties.NetworkProfile.NetworkInterfaces == nil || len(instance.Properties.NetworkProfile.NetworkInterfaces) == 0 {
 		return nil, NoNetworkInterfaceError
 	}
-	networkInterfaces := []network.Interface{}
+	networkInterfaces := []armnetwork.Interface{}
 	// Try to get the ID corresponding to the "primary" NIC and put that first
 	// in the slice. Do it like this because it's assumed to not be guaranteed
 	// to be first in the slice returned by the Azure API?
@@ -513,10 +530,14 @@ func (a *Azure) getBackendAddressPool(poolID string) (*network.BackendAddressPoo
 
 }
 
-func (a *Azure) getNetworkInterface(id string) (network.Interface, error) {
+func (a *Azure) getNetworkInterface(id string) (armnetwork.Interface, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
 	defer cancel()
-	return a.networkClient.Get(ctx, a.resourceGroup, getNameFromResourceID(id), "")
+	response, err := a.networkClient.Get(ctx, a.resourceGroup, getNameFromResourceID(id), nil)
+	if err != nil {
+		return armnetwork.Interface{}, fmt.Errorf("failed to retrieve network interface for id %s: %w", id, err)
+	}
+	return response.Interface, nil
 }
 
 // This is what the subnet ID looks like on Azure:
@@ -530,14 +551,14 @@ func (a *Azure) getNetworkResourceGroupAndSubnetAndNetnames(subnetID string) (st
 	return providerData[4], providerData[len(providerData)-3], providerData[len(providerData)-1], nil
 }
 
-func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string, error) {
+func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]string, error) {
 	var virtualNetworkResourceGroup string
 	var virtualNetworkName string
 	var subnetName string
 	var err error
-	for _, ipConfiguration := range *networkInterface.IPConfigurations {
-		if *ipConfiguration.Primary {
-			virtualNetworkResourceGroup, virtualNetworkName, subnetName, err = a.getNetworkResourceGroupAndSubnetAndNetnames(*ipConfiguration.Subnet.ID)
+	for _, ipConfiguration := range networkInterface.Properties.IPConfigurations {
+		if ptr.Deref(ipConfiguration.Properties.Primary, false) {
+			virtualNetworkResourceGroup, virtualNetworkName, subnetName, err = a.getNetworkResourceGroupAndSubnetAndNetnames(ptr.Deref(ipConfiguration.Properties.Subnet.ID, ""))
 			if err != nil {
 				return nil, err
 			}
