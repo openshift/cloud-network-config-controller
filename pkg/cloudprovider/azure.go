@@ -18,11 +18,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
-	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/msi-dataplane/pkg/dataplane"
-	"github.com/jongio/azidext/go/azidext"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/cloud-network-config-controller/pkg/filewatcher"
@@ -139,7 +137,7 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
 	}
 
-	_, cred, cloudConfig, err := a.getAuthorizer(a.env, cfg)
+	cred, cloudConfig, err := a.getAzureCredentials(a.env, cfg)
 	if err != nil {
 		return err
 	}
@@ -596,7 +594,7 @@ func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]*st
 	return virtualNetwork.Properties.AddressSpace.AddressPrefixes, nil
 }
 
-func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsConfig) (autorest.Authorizer, azcore.TokenCredential, cloud.Configuration, error) {
+func (a *Azure) getAzureCredentials(env azureapi.Environment, cfg *azureCredentialsConfig) (azcore.TokenCredential, cloud.Configuration, error) {
 	var (
 		cred azcore.TokenCredential
 		err  error
@@ -621,23 +619,23 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 
 		certData, err := os.ReadFile(certPath)
 		if err != nil {
-			return nil, nil, cloud.Configuration{}, fmt.Errorf(`failed to read certificate file "%s": %v`, certPath, err)
+			return nil, cloud.Configuration{}, fmt.Errorf(`failed to read certificate file "%s": %v`, certPath, err)
 		}
 
 		certs, key, err := azidentity.ParseCertificates(certData, []byte{})
 		if err != nil {
-			return nil, nil, cloud.Configuration{}, fmt.Errorf(`failed to parse certificate data "%s": %v`, certPath, err)
+			return nil, cloud.Configuration{}, fmt.Errorf(`failed to parse certificate data "%s": %v`, certPath, err)
 		}
 
 		// Watch the certificate for changes; if the certificate changes, the pod will be restarted
 		err = filewatcher.WatchFileForChanges(certPath)
 		if err != nil {
-			return nil, nil, cloud.Configuration{}, err
+			return nil, cloud.Configuration{}, err
 		}
 
 		cred, err = azidentity.NewClientCertificateCredential(tenantID, managedIdentityClientID, certs, key, options)
 		if err != nil {
-			return nil, nil, cloud.Configuration{}, err
+			return nil, cloud.Configuration{}, err
 		}
 	} else if userAssignedIdentityCredentialsFilePath != "" {
 		// UserAssignedIdentityCredentials for managed Azure HCP
@@ -646,13 +644,13 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		}
 		cred, err = dataplane.NewUserAssignedIdentityCredential(context.Background(), userAssignedIdentityCredentialsFilePath, dataplane.WithClientOpts(clientOptions))
 		if err != nil {
-			return nil, nil, cloud.Configuration{}, err
+			return nil, cloud.Configuration{}, err
 		}
 	} else if strings.TrimSpace(cfg.clientSecret) == "" {
 		if a.azureWorkloadIdentityEnabled && strings.TrimSpace(cfg.tokenFile) != "" {
 			klog.Infof("Using workload identity authentication")
 			if cfg.clientID == "" || cfg.tenantID == "" {
-				return nil, nil, cloud.Configuration{}, fmt.Errorf("clientID and tenantID are required in workload identity authentication")
+				return nil, cloud.Configuration{}, fmt.Errorf("clientID and tenantID are required in workload identity authentication")
 			}
 			options := azidentity.WorkloadIdentityCredentialOptions{
 				ClientOptions: azcore.ClientOptions{
@@ -664,13 +662,13 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 			}
 			cred, err = azidentity.NewWorkloadIdentityCredential(&options)
 			if err != nil {
-				return nil, nil, cloud.Configuration{}, err
+				return nil, cloud.Configuration{}, err
 			}
 		}
 	} else {
 		klog.Infof("Using client secret authentication")
 		if cfg.clientID == "" || cfg.tenantID == "" {
-			return nil, nil, cloud.Configuration{}, fmt.Errorf("clientID and tenantID are required in client secret authentication")
+			return nil, cloud.Configuration{}, fmt.Errorf("clientID and tenantID are required in client secret authentication")
 		}
 		options := azidentity.ClientSecretCredentialOptions{
 			ClientOptions: azcore.ClientOptions{
@@ -679,17 +677,11 @@ func (a *Azure) getAuthorizer(env azureapi.Environment, cfg *azureCredentialsCon
 		}
 		cred, err = azidentity.NewClientSecretCredential(cfg.tenantID, cfg.clientID, cfg.clientSecret, &options)
 		if err != nil {
-			return nil, nil, cloud.Configuration{}, err
+			return nil, cloud.Configuration{}, err
 		}
 	}
 
-	scope := env.TokenAudience
-	if !strings.HasSuffix(scope, "/.default") {
-		scope += "/.default"
-	}
-	authorizer := azidext.NewTokenCredentialAdapter(cred, []string{scope})
-
-	return authorizer, cred, cloudConfig, nil
+	return cred, cloudConfig, nil
 }
 
 // getNodeLock retrieves node lock from nodeLockMap, If lock doesn't exist, then update map
