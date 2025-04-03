@@ -220,9 +220,9 @@ OuterLoop:
 				//     BackendAddressPoolPropertiesFormat:(*network.BackendAddressPoolPropertiesFormat)(nil)
 				// Do a separate get for this pool in order to check whether there are any outbound rules
 				// attached to it
-				realPool, err := a.getBackendAddressPool(*pool.ID)
+				realPool, err := a.getBackendAddressPool(ptr.Deref(pool.ID, ""))
 				if err != nil {
-					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", *pool.Name, *pool.ID, err)
+					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", ptr.Deref(pool.Name, ""), ptr.Deref(pool.ID, ""), err)
 				}
 				if realPool.Properties.LoadBalancerBackendAddresses != nil && len(realPool.Properties.LoadBalancerBackendAddresses) > 0 {
 					if realPool.Properties.OutboundRule != nil {
@@ -243,7 +243,7 @@ OuterLoop:
 		outboundRuleStr := ""
 		if attachedOutboundRule != nil && attachedOutboundRule.ID != nil {
 			// https://issues.redhat.com/browse/OCPBUGS-33617 showed that there can be a rule without an ID...
-			outboundRuleStr = fmt.Sprintf(": %s", *attachedOutboundRule.ID)
+			outboundRuleStr = fmt.Sprintf(": %s", ptr.Deref(attachedOutboundRule.ID, ""))
 		}
 		klog.Warningf("Egress IP %s will have no outbound connectivity except for the infrastructure subnet: "+
 			"omitting backend address pool when adding secondary IP: it has an outbound rule already%s",
@@ -338,7 +338,7 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPCo
 	networkInterface := networkInterfaces[0]
 	// Prepare the config
 	config := &NodeEgressIPConfiguration{
-		Interface: strings.TrimPrefix(getNameFromResourceID(*networkInterface.ID), "/"),
+		Interface: strings.TrimPrefix(getNameFromResourceID(ptr.Deref(networkInterface.ID, "")), "/"),
 	}
 	v4Subnet, v6Subnet, err := a.getSubnet(networkInterface)
 	if err != nil {
@@ -362,7 +362,7 @@ func (a *Azure) createOrUpdate(networkInterface armnetwork.Interface) (*runtime.
 	defer cancel()
 	poller, err := a.networkClient.BeginCreateOrUpdate(ctx, a.resourceGroup, ptr.Deref(networkInterface.Name, ""), networkInterface, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create or update network interface: %v, err: %v", *networkInterface.Name, err)
+		return nil, fmt.Errorf("failed to create or update network interface: %v, err: %v", ptr.Deref(networkInterface.Name, ""), err)
 	}
 
 	return poller, nil
@@ -390,7 +390,7 @@ func (a *Azure) getSubnet(networkInterface armnetwork.Interface) (*net.IPNet, *n
 		}
 		_, subnet, err := net.ParseCIDR(*addressPrefix)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error: unable to parse found AddressPrefix: %s for network interface, err: %v", *addressPrefix, err)
+			return nil, nil, fmt.Errorf("error: unable to parse found AddressPrefix: %s for network interface, err: %v", ptr.Deref(addressPrefix, ""), err)
 		}
 		if utilnet.IsIPv6CIDR(subnet) {
 			if v6Subnet == nil {
@@ -457,7 +457,7 @@ func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]arm
 	// to be first in the slice returned by the Azure API?
 	for _, netif := range instance.Properties.NetworkProfile.NetworkInterfaces {
 		if netif.Properties != nil && netif.Properties.Primary != nil && ptr.Deref(netif.Properties.Primary, false) {
-			intf, err := a.getNetworkInterface(*netif.ID)
+			intf, err := a.getNetworkInterface(ptr.Deref(netif.ID, ""))
 			if err != nil {
 				return nil, err
 			}
@@ -467,8 +467,8 @@ func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]arm
 	}
 	// Get the rest and append that.
 	for _, netif := range instance.Properties.NetworkProfile.NetworkInterfaces {
-		if netif.Properties != nil && ((netif.Properties.Primary != nil && !*netif.Properties.Primary) || netif.Properties.Primary == nil) {
-			intf, err := a.getNetworkInterface(*netif.ID)
+		if netif.Properties != nil && !ptr.Deref(netif.Properties.Primary, false) {
+			intf, err := a.getNetworkInterface(ptr.Deref(netif.ID, ""))
 			if err != nil {
 				return nil, err
 			}
@@ -579,7 +579,7 @@ func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]*st
 	if virtualNetwork.Properties != nil && virtualNetwork.Properties.Subnets != nil {
 		for _, vns := range virtualNetwork.Properties.Subnets {
 			if vns.Name != nil && vns.Properties.AddressPrefix != nil &&
-				*vns.Name == subnetName {
+				ptr.Deref(vns.Name, "") == subnetName {
 				return []*string{vns.Properties.AddressPrefix}, nil
 			}
 		}
