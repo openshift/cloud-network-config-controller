@@ -206,9 +206,9 @@ OuterLoop:
 				//     BackendAddressPoolPropertiesFormat:(*network.BackendAddressPoolPropertiesFormat)(nil)
 				// Do a separate get for this pool in order to check whether there are any outbound rules
 				// attached to it
-				realPool, err := a.getBackendAddressPool(*pool.ID)
+				realPool, err := a.getBackendAddressPool(ptr.Deref(pool.ID, ""))
 				if err != nil {
-					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", *pool.Name, *pool.ID, err)
+					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", ptr.Deref(pool.Name, ""), ptr.Deref(pool.ID, ""), err)
 				}
 				if realPool.BackendAddressPoolPropertiesFormat != nil {
 					if realPool.BackendAddressPoolPropertiesFormat.OutboundRule != nil {
@@ -229,7 +229,7 @@ OuterLoop:
 		outboundRuleStr := ""
 		if attachedOutboundRule != nil && attachedOutboundRule.ID != nil {
 			// https://issues.redhat.com/browse/OCPBUGS-33617 showed that there can be a rule without an ID...
-			outboundRuleStr = fmt.Sprintf(": %s", *attachedOutboundRule.ID)
+			outboundRuleStr = fmt.Sprintf(": %s", ptr.Deref(attachedOutboundRule.ID, ""))
 		}
 		klog.Warningf("Egress IP %s will have no outbound connectivity except for the infrastructure subnet: "+
 			"omitting backend address pool when adding secondary IP: it has an outbound rule already%s",
@@ -321,7 +321,7 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set
 	networkInterface := networkInterfaces[0]
 	// Prepare the config
 	config := &NodeEgressIPConfiguration{
-		Interface: strings.TrimPrefix(getNameFromResourceID(*networkInterface.ID), "/"),
+		Interface: strings.TrimPrefix(getNameFromResourceID(ptr.Deref(networkInterface.ID, "")), "/"),
 	}
 	v4Subnet, v6Subnet, err := a.getSubnet(networkInterface)
 	if err != nil {
@@ -344,7 +344,7 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set
 func (a *Azure) createOrUpdate(networkInterface network.Interface) (network.InterfacesCreateOrUpdateFuture, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
 	defer cancel()
-	return a.networkClient.CreateOrUpdate(ctx, a.resourceGroup, *networkInterface.Name, networkInterface)
+	return a.networkClient.CreateOrUpdate(ctx, a.resourceGroup, ptr.Deref(networkInterface.Name, ""), networkInterface)
 }
 
 func (a *Azure) waitForCompletion(result network.InterfacesCreateOrUpdateFuture) error {
@@ -428,8 +428,8 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 	// in the slice. Do it like this because it's assumed to not be guaranteed
 	// to be first in the slice returned by the Azure API?
 	for _, netif := range *instance.NetworkProfile.NetworkInterfaces {
-		if netif.NetworkInterfaceReferenceProperties != nil && netif.Primary != nil && *netif.Primary {
-			intf, err := a.getNetworkInterface(*netif.ID)
+		if netif.NetworkInterfaceReferenceProperties != nil && ptr.Deref(netif.Primary, false) {
+			intf, err := a.getNetworkInterface(ptr.Deref(netif.ID, ""))
 			if err != nil {
 				return nil, err
 			}
@@ -439,8 +439,8 @@ func (a *Azure) getNetworkInterfaces(instance *compute.VirtualMachine) ([]networ
 	}
 	// Get the rest and append that.
 	for _, netif := range *instance.NetworkProfile.NetworkInterfaces {
-		if netif.NetworkInterfaceReferenceProperties != nil && ((netif.Primary != nil && !*netif.Primary) || netif.Primary == nil) {
-			intf, err := a.getNetworkInterface(*netif.ID)
+		if netif.NetworkInterfaceReferenceProperties != nil && !ptr.Deref(netif.Primary, false) {
+			intf, err := a.getNetworkInterface(ptr.Deref(netif.ID, ""))
 			if err != nil {
 				return nil, err
 			}
@@ -547,7 +547,7 @@ func (a *Azure) getAddressPrefixes(networkInterface network.Interface) ([]string
 	if virtualNetwork.Subnets != nil {
 		for _, vns := range *virtualNetwork.Subnets {
 			if vns.Name != nil && vns.AddressPrefix != nil &&
-				*vns.Name == subnetName {
+				ptr.Deref(vns.Name, "") == subnetName {
 				return []string{*vns.AddressPrefix}, nil
 			}
 		}
