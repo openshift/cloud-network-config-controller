@@ -184,6 +184,7 @@ type: Opaque
 
 ```
 tree /etc/secret/cloudprovider
+├── cacert
 └── cloud.yaml
 ```
 
@@ -193,12 +194,18 @@ or as a Kubernetes secret defined as:
 apiVersion: v1
 data:
   clouds.yaml: <base64 string>
+  cacert: <base64 string>
 kind: Secret
 metadata:
   name: cloud-credentials
   namespace: cloud-network-config-controller
 type: Opaque
 ```
+
+> Note: The `cacert` file/field is optional. If provided, then the operator
+> will assume that this is a valid CA chain and will use this data when talking
+> to the OpenStack API.
+
 ### ConfigMap
 
 The Cluster Network Operator will create a ConfigMap named `kube-cloud-config`

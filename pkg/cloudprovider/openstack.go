@@ -119,9 +119,24 @@ func (o *OpenStack) initCredentials() error {
 	}
 
 	// Read CA information - needed for self-signed certificates.
-	// That information is stored in ConfigMap kube-cloud-config.
-	caBundle := filepath.Join(o.cfg.ConfigDir, "ca-bundle.pem")
+	// That information is stored in ConfigMap kube-cloud-config and, since 4.19,
+	// in the secret cloud-credentials. Prefer the latter if found.
+	caBundle := filepath.Join(o.cfg.CredentialDir, "cacert")
 	userCACert, err := os.ReadFile(caBundle)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("could not parse file '%s', err: %q", caBundle, err)
+		}
+
+		// Fallback for retrieving CA cert from the CCM config. Starting in
+		// OCP 4.19, cloud-credential-operator provides this in the credential
+		// secret, as seen above, so this is no longer necessary outside of
+		// upgrade scenarios.
+		// TODO(stephenfin): Remove in 4.20
+		caBundle = filepath.Join(o.cfg.ConfigDir, "ca-bundle.pem")
+		userCACert, err = os.ReadFile(caBundle)
+	}
+
 	if err == nil && string(userCACert) != "" {
 		klog.Infof("Custom CA bundle found at location '%s' - reading certificate information", caBundle)
 		certPool, err := x509.SystemCertPool()
