@@ -30,7 +30,11 @@ const (
 
 	// ClientTimeout specifies the timeout for our calls to the API server for
 	// all client operations
-	ClientTimeout = 2 * time.Second
+	ClientTimeout = 30 * time.Second
+
+	// APIResponseSoftLimit specifies the time after which a Warning gets logged if
+	// response from API is not received before that time
+	APIResponseSoftLimit = 2 * time.Second
 )
 
 type CloudNetworkConfigControllerIntf interface {
