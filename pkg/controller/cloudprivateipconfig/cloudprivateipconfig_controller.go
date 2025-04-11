@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"time"
 
 	cloudnetworkv1 "github.com/openshift/api/cloudnetwork/v1"
 	cloudnetworkclientset "github.com/openshift/client-go/cloudnetwork/clientset/versioned"
@@ -444,9 +445,14 @@ func (c *CloudPrivateIPConfigController) updateCloudPrivateIPConfigStatus(cloudP
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		ctx, cancel := context.WithTimeout(c.ctx, controller.ClientTimeout)
 		defer cancel()
+		warningTime := time.Now().Add(controller.APIResponseSoftLimit)
 		var err error
 		cloudPrivateIPConfig.Status = *status
 		updatedCloudPrivateIPConfig, err = c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().UpdateStatus(ctx, cloudPrivateIPConfig, metav1.UpdateOptions{})
+		if time.Until(warningTime) <= 0 {
+			klog.Warningf("CloudPrivateIPConfig: Update API call took longer than expected for resource %q, Egress IP configuration might be delayed",
+				cloudPrivateIPConfig.Name)
+		}
 		return err
 	})
 	return updatedCloudPrivateIPConfig, err
@@ -483,13 +489,19 @@ func (c *CloudPrivateIPConfigController) patchCloudPrivateIPConfigFinalizer(clou
 func (c *CloudPrivateIPConfigController) patchCloudPrivateIPConfig(name string, patchData []byte) (*cloudnetworkv1.CloudPrivateIPConfig, error) {
 	ctx, cancel := context.WithTimeout(c.ctx, controller.ClientTimeout)
 	defer cancel()
-	return c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Patch(ctx, name, types.JSONPatchType, patchData, metav1.PatchOptions{})
+	warningTime := time.Now().Add(controller.APIResponseSoftLimit)
+	cloudPrivateIPConfig, err := c.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Patch(ctx, name, types.JSONPatchType, patchData, metav1.PatchOptions{})
+	if time.Until(warningTime) <= 0 {
+		klog.Warningf("CloudPrivateIPConfig: Patch API call took longer than expected for resource %q, Egress IP configuration might be delayed", name)
+	}
+	return cloudPrivateIPConfig, err
 }
 
 // getCloudPrivateIPConfig retrieves the object from the API server
 func (c *CloudPrivateIPConfigController) getCloudPrivateIPConfig(name string) (*cloudnetworkv1.CloudPrivateIPConfig, error) {
 	ctx, cancel := context.WithTimeout(c.ctx, controller.ClientTimeout)
 	defer cancel()
+	warningTime := time.Now().Add(controller.APIResponseSoftLimit)
 	// This object will repeatedly be updated during this sync, hence we need to
 	// retrieve the object from the API server as opposed to the informer cache
 	// for every sync, otherwise we risk acting on an old object
@@ -503,6 +515,9 @@ func (c *CloudPrivateIPConfigController) getCloudPrivateIPConfig(name string) (*
 			return nil, nil
 		}
 		return nil, err
+	}
+	if time.Until(warningTime) <= 0 {
+		klog.Warningf("CloudPrivateIPConfig: Get API call took longer than expected for resource %q, Egress IP configuration might be delayed", name)
 	}
 	return cloudPrivateIPConfig, nil
 }
