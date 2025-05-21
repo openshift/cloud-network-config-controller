@@ -19,7 +19,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
-	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/msi-dataplane/pkg/dataplane"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
@@ -45,7 +44,7 @@ type Azure struct {
 	CloudProvider
 	platformStatus               *configv1.AzurePlatformStatus
 	resourceGroup                string
-	env                          azure.Environment
+	env                          azureapi.Environment
 	vmClient                     *armcompute.VirtualMachinesClient
 	virtualNetworkClient         *armnetwork.VirtualNetworksClient
 	networkClient                *armnetwork.InterfacesClient
@@ -125,13 +124,13 @@ func (a *Azure) initCredentials() error {
 
 	// Pick the Azure "Environment", which is just a named set of API endpoints.
 	if a.cfg.APIOverride != "" {
-		a.env, err = azure.EnvironmentFromURL(a.cfg.APIOverride)
+		a.env, err = azureapi.EnvironmentFromURL(a.cfg.APIOverride)
 	} else {
 		name := a.cfg.AzureEnvironment
 		if name == "" {
 			name = "AzurePublicCloud"
 		}
-		a.env, err = azure.EnvironmentFromName(name)
+		a.env, err = azureapi.EnvironmentFromName(name)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
@@ -396,7 +395,7 @@ func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]arm
 	if instance.Properties == nil || instance.Properties.NetworkProfile == nil {
 		return nil, NoNetworkInterfaceError
 	}
-	if instance.Properties.NetworkProfile.NetworkInterfaces == nil || len(instance.Properties.NetworkProfile.NetworkInterfaces) == 0 {
+	if len(instance.Properties.NetworkProfile.NetworkInterfaces) == 0 {
 		return nil, NoNetworkInterfaceError
 	}
 	networkInterfaces := []armnetwork.Interface{}
@@ -496,7 +495,7 @@ func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]*st
 	if virtualNetwork.Properties.AddressSpace == nil {
 		return nil, fmt.Errorf("nil subnet address space")
 	}
-	if virtualNetwork.Properties.AddressSpace.AddressPrefixes == nil || len(virtualNetwork.Properties.AddressSpace.AddressPrefixes) == 0 {
+	if len(virtualNetwork.Properties.AddressSpace.AddressPrefixes) == 0 {
 		return nil, fmt.Errorf("no subnet address prefixes defined")
 	}
 	return virtualNetwork.Properties.AddressSpace.AddressPrefixes, nil
@@ -577,11 +576,11 @@ func getNameFromResourceID(id string) string {
 func ParseCloudEnvironment(env azureapi.Environment) cloud.Configuration {
 	var cloudConfig cloud.Configuration
 	switch env {
-	case azure.ChinaCloud:
+	case azureapi.ChinaCloud:
 		cloudConfig = cloud.AzureChina
-	case azure.USGovernmentCloud:
+	case azureapi.USGovernmentCloud:
 		cloudConfig = cloud.AzureGovernment
-	case azure.PublicCloud:
+	case azureapi.PublicCloud:
 		cloudConfig = cloud.AzurePublic
 	default: // AzureStackCloud
 		cloudConfig = cloud.Configuration{
