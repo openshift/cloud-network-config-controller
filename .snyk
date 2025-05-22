@@ -5,18 +5,19 @@ exclude:
   global:
     # TODO: silence security warnings for now, but follow up with
     # https://issues.redhat.com/browse/SDN-4462.
-    - vendor/k8s.io/client-go/util/cert/server_inspection.go
-    - vendor/github.com/Azure/go-autorest/autorest/azure/rp.go
-    - vendor/github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/local/server.go
-    - vendor/k8s.io/klog/v2/klog_file.go
-    - vendor/github.com/openshift/library-go/pkg/crypto/crypto.go
-    - vendor/github.com/Azure/go-autorest/autorest/adal/token.go
+    # ** KEEP THIS LIST SORTED FOR CONSISTENCY **
     - vendor/github.com/aws/aws-sdk-go/aws/credentials/ssocreds/provider.go
-    - vendor/github.com/google/uuid/hash.go
-    - vendor/github.com/openshift/library-go/pkg/operator/resource/resourceapply/resource_cache.go
-    - vendor/github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/oauth/ops/accesstokens/accesstokens.go
-    - vendor/golang.org/x/crypto/pkcs12/pbkdf.go
-    - vendor/github.com/Azure/azure-sdk-for-go/sdk/azidentity/azidentity.go
-    - vendor/github.com/openshift/api/config/v1/types_oauth.go
-    - vendor/github.com/Azure/azure-sdk-for-go/sdk/azidentity/username_password_credential.go
     - vendor/github.com/aws/aws-sdk-go/service/sts/api.go
+    - vendor/github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/local/server.go
+    - vendor/github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/oauth/ops/accesstokens/accesstokens.go
+    - vendor/github.com/Azure/azure-sdk-for-go/sdk/azidentity/azidentity.go
+    - vendor/github.com/Azure/azure-sdk-for-go/sdk/azidentity/username_password_credential.go
+    - vendor/github.com/Azure/go-autorest/autorest/adal/token.go
+    - vendor/github.com/Azure/go-autorest/autorest/azure/rp.go
+    - vendor/github.com/google/uuid/hash.go
+    - vendor/github.com/openshift/api/config/v1/types_oauth.go
+    - vendor/github.com/openshift/library-go/pkg/crypto/crypto.go
+    - vendor/github.com/openshift/library-go/pkg/operator/resource/resourceapply/resource_cache.go
+    - vendor/golang.org/x/crypto/pkcs12/pbkdf.go
+    - vendor/k8s.io/client-go/util/cert/server_inspection.go
+    - vendor/k8s.io/klog/v2/klog_file.go
