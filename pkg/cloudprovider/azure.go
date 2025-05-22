@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -184,47 +185,117 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	if err != nil {
 		return err
 	}
-	if networkInterfaces[0].Properties == nil {
-		return fmt.Errorf("nil network interface properties")
+
+	if len(networkInterfaces) == 0 {
+		return fmt.Errorf("no network interfaces returned for node %s instance", node.Name)
 	}
-	applicationSecurityGroups := networkInterfaces[0].Properties.IPConfigurations[0].Properties.ApplicationSecurityGroups
 
 	// Perform the operation against the first interface listed, which will be
 	// the primary interface (if it's defined as such) or the first one returned
 	// following the order Azure specifies.
 	networkInterface := networkInterfaces[0]
-	// Assign the IP
-	ipConfigurations := networkInterface.Properties.IPConfigurations
-	name := fmt.Sprintf("%s_%s", node.Name, ipc)
+	if networkInterface.Properties == nil {
+		return fmt.Errorf("nil network interface properties")
+	}
 
-	newIPConfiguration := &armnetwork.InterfaceIPConfiguration{
-		Name: &name,
-		Properties: &armnetwork.InterfaceIPConfigurationPropertiesFormat{
-			PrivateIPAddress:          &ipc,
-			PrivateIPAllocationMethod: ptr.To(armnetwork.IPAllocationMethodStatic),
-			Subnet:                    networkInterface.Properties.IPConfigurations[0].Properties.Subnet,
-			Primary:                   ptr.To(false),
-			ApplicationSecurityGroups: applicationSecurityGroups,
-		},
+	if err := updateNICIPConfigurations(ipc, node.Name, networkInterface.Properties); err != nil {
+		return err
 	}
-	for _, ipCfg := range ipConfigurations {
-		if ptr.Deref(ipCfg.Properties.PrivateIPAddress, "") == ipc {
-			json, err := ipCfg.MarshalJSON()
-			if err != nil {
-				klog.Errorf("Failed to marshall the ip configuration: %v", err)
-			}
-			klog.Warningf("IP: %s is already assigned to node: %s with the ip configuration: %s", ipc, node.Name, json)
-			return AlreadyExistingIPError
-		}
-	}
-	ipConfigurations = append(ipConfigurations, newIPConfiguration)
-	networkInterface.Properties.IPConfigurations = ipConfigurations
-	// Send the request
+
+	// Update the NIC
 	poller, err := a.createOrUpdate(networkInterface)
 	if err != nil {
 		return err
 	}
 	return a.waitForCompletion(poller)
+}
+
+func updateNICIPConfigurations(ipc, nodeName string, nicProperties *armnetwork.InterfacePropertiesFormat) error {
+	// Create a new IPConfiguration for the EgressIP. Copy certain properties
+	// from the first listed IPConfiguration on the NIC, which is expected to be
+	// the Node's 'primary' IPConfiguration.
+	name := fmt.Sprintf("%s_%s", nodeName, ipc)
+	newIPConfiguration := &armnetwork.InterfaceIPConfiguration{
+		Name: &name,
+		Properties: &armnetwork.InterfaceIPConfigurationPropertiesFormat{
+			PrivateIPAddress:          &ipc,
+			PrivateIPAllocationMethod: ptr.To(armnetwork.IPAllocationMethodStatic),
+			Subnet:                    nicProperties.IPConfigurations[0].Properties.Subnet,
+			Primary:                   ptr.To(false),
+
+			// Are ApplicationSecurityGroups relevant here? Do they affect egress traffic? Can pods accept ingress traffic on an Egress IP?
+			ApplicationSecurityGroups: nicProperties.IPConfigurations[0].Properties.ApplicationSecurityGroups,
+			// What about NetworkSecurityGroups?
+		},
+	}
+
+	// Look for an existing IPConfiguration with the desired Egress IP
+	// Update an existing IPConfiguration for this IP, or add a new one if required
+	// Do nothing if the IPConfiguration is exists and is up to date
+	ipConfigurations := nicProperties.IPConfigurations
+	for i, ipCfg := range ipConfigurations {
+		if ptr.Deref(ipCfg.Properties.PrivateIPAddress, "") == ipc {
+			// No action required if the ipconfig already matched the desired state
+			if ipconfigMatches(ipCfg, newIPConfiguration) {
+				json, err := ipCfg.MarshalJSON()
+				if err != nil {
+					klog.Errorf("Failed to marshall the ip configuration: %v", err)
+				}
+				klog.Infof("IP: %s is already assigned to node: %s with the ip configuration: %s", ipc, nodeName, json)
+				return AlreadyExistingIPError
+			}
+
+			// Update the IP configuration in-place
+			ipConfigurations[i] = newIPConfiguration
+			return nil
+		}
+	}
+
+	// Not found, so append it
+	nicProperties.IPConfigurations = append(ipConfigurations, newIPConfiguration)
+	return nil
+}
+
+func ipconfigMatches(current, desired *armnetwork.InterfaceIPConfiguration) bool {
+	desiredP := desired.Properties
+	currentP := current.Properties
+	if desiredP == nil || currentP == nil {
+		return false
+	}
+
+	if ptr.Deref(desiredP.PrivateIPAllocationMethod, "") != ptr.Deref(currentP.PrivateIPAllocationMethod, "") {
+		return false
+	}
+
+	if ptr.Deref(desiredP.Primary, false) != ptr.Deref(currentP.Primary, false) {
+		return false
+	}
+
+	// Subnet is a reference, so we only check ID
+	if (desiredP.Subnet == nil) != (currentP.Subnet == nil) {
+		return false
+	}
+	if desiredP.Subnet != nil && ptr.Deref(desiredP.Subnet.ID, "") != ptr.Deref(currentP.Subnet.ID, "") {
+		return false
+	}
+
+	// This was set by an older version of CNCC. We need to unset it.
+	if len(currentP.LoadBalancerBackendAddressPools) > 0 {
+		return false
+	}
+
+	// ApplicationSecurityGroups match if the set of referenced IDs match, ignoring order.
+	ids := func(asgs []*armnetwork.ApplicationSecurityGroup) []string {
+		r := make([]string, 0, len(asgs))
+		for _, asg := range asgs {
+			if asg.ID != nil {
+				r = append(r, *asg.ID)
+			}
+		}
+		slices.Sort(r)
+		return r
+	}
+	return slices.Equal(ids(desiredP.ApplicationSecurityGroups), ids(currentP.ApplicationSecurityGroups))
 }
 
 func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
