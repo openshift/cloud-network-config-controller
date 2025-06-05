@@ -348,7 +348,7 @@ func HandleServerGet(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fmt.Fprintf(w, string(out))
+			fmt.Fprint(w, string(out))
 		})
 	}
 }
@@ -377,7 +377,7 @@ func HandleSubnetList(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fmt.Fprintf(w, string(out))
+		fmt.Fprint(w, string(out))
 	})
 }
 
@@ -449,7 +449,7 @@ func portListHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Fprintf(w, string(out))
+	fmt.Fprint(w, string(out))
 }
 
 func portCreationHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
@@ -538,7 +538,7 @@ outer:
 		t.Fatalf("Unexpected error during marshal operation, err: %q", err)
 	}
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, string(b))
+	fmt.Fprint(w, string(b))
 }
 
 func HandlePortGetUpdateDelete(t *testing.T, portID string) {
@@ -563,7 +563,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 			if r.Method == "DELETE" {
 				delete(portMap, portID)
 				w.WriteHeader(http.StatusAccepted)
-				fmt.Fprintf(w, "")
+				fmt.Fprint(w, "")
 				return
 			}
 
@@ -579,7 +579,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				fmt.Fprintf(w, string(out))
+				fmt.Fprint(w, string(out))
 				return
 			}
 
@@ -598,7 +598,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 			updateCounter++
 			if updateCounter%2 == 1 {
 				w.WriteHeader(http.StatusPreconditionFailed)
-				fmt.Fprintf(w, "RevisionNumberConstraintFailed")
+				fmt.Fprint(w, "RevisionNumberConstraintFailed")
 				return
 			}
 
@@ -621,7 +621,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 				t.Fatalf("Unexpected error during marshal operation, err: %q", err)
 			}
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, string(b))
+			fmt.Fprint(w, string(b))
 		})
 	}
 
