@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	apifeatures "github.com/openshift/api/features"
-	configv1 "github.com/openshift/api/config/v1"
-	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
+
+	configv1 "github.com/openshift/api/config/v1"
+	apifeatures "github.com/openshift/api/features"
+	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 
 	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
