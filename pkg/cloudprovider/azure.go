@@ -48,7 +48,6 @@ type Azure struct {
 	vmClient                     *armcompute.VirtualMachinesClient
 	virtualNetworkClient         *armnetwork.VirtualNetworksClient
 	networkClient                *armnetwork.InterfacesClient
-	backendAddressPoolClient     *armnetwork.LoadBalancerBackendAddressPoolsClient
 	nodeMapLock                  sync.Mutex
 	nodeLockMap                  map[string]*sync.Mutex
 	azureWorkloadIdentityEnabled bool
@@ -162,11 +161,6 @@ func (a *Azure) initCredentials() error {
 		return fmt.Errorf("failed to initialize new VirtualNetworksClient: %w", err)
 	}
 
-	a.backendAddressPoolClient, err = armnetwork.NewLoadBalancerBackendAddressPoolsClient(cfg.subscriptionID, cred, options)
-	if err != nil {
-		return fmt.Errorf("failed to initialize new LoadBalancerBackendAddressPoolsClient: %w", err)
-	}
-
 	return nil
 }
 
@@ -198,65 +192,14 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	name := fmt.Sprintf("%s_%s", node.Name, ipc)
 	untrue := false
 
-	// In some Azure setups (Azure private, public ARO, private ARO) outbound connectivity is achieved through
-	// outbound rules tied to the backend address pool of the primary IP of the VM NIC. An Azure constraint
-	// forbids the creation of a secondary IP tied to such address pool and would result in
-	// OutboundRuleCannotBeUsedWithBackendAddressPoolThatIsReferencedBySecondaryIpConfigs.
-	// Work around it by not specifying the backend address pool when an outbound rule is set, even though
-	// that means preventing outbound connectivity to the egress IP, which will be able to reach the
-	// infrastructure subnet nonetheless. In public Azure clusters, outbound connectivity is achieved through
-	// UserDefinedRouting, which doesn't impose such constraints on secondary IPs.
-	loadBalancerBackendAddressPoolsArgument := networkInterface.Properties.IPConfigurations[0].Properties.LoadBalancerBackendAddressPools
-	var attachedOutboundRule *armnetwork.SubResource
-OuterLoop:
-	for _, ipconfig := range networkInterface.Properties.IPConfigurations {
-		if ipconfig.Properties.LoadBalancerBackendAddressPools != nil {
-			for _, pool := range ipconfig.Properties.LoadBalancerBackendAddressPools {
-				if pool.ID == nil {
-					continue
-				}
-				// for some reason, the struct for the pool above is not entirely filled out:
-				//     BackendAddressPoolPropertiesFormat:(*network.BackendAddressPoolPropertiesFormat)(nil)
-				// Do a separate get for this pool in order to check whether there are any outbound rules
-				// attached to it
-				realPool, err := a.getBackendAddressPool(ptr.Deref(pool.ID, ""))
-				if err != nil {
-					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", ptr.Deref(pool.Name, ""), ptr.Deref(pool.ID, ""), err)
-				}
-				if len(realPool.Properties.LoadBalancerBackendAddresses) > 0 {
-					if realPool.Properties.OutboundRule != nil {
-						loadBalancerBackendAddressPoolsArgument = nil
-						attachedOutboundRule = realPool.Properties.OutboundRule
-						break OuterLoop
-					}
-					if len(realPool.Properties.OutboundRules) > 0 {
-						loadBalancerBackendAddressPoolsArgument = nil
-						attachedOutboundRule = (realPool.Properties.OutboundRules)[0]
-						break OuterLoop
-					}
-				}
-			}
-		}
-	}
-	if loadBalancerBackendAddressPoolsArgument == nil {
-		outboundRuleStr := ""
-		if attachedOutboundRule != nil && attachedOutboundRule.ID != nil {
-			// https://issues.redhat.com/browse/OCPBUGS-33617 showed that there can be a rule without an ID...
-			outboundRuleStr = fmt.Sprintf(": %s", ptr.Deref(attachedOutboundRule.ID, ""))
-		}
-		klog.Warningf("Egress IP %s will have no outbound connectivity except for the infrastructure subnet: "+
-			"omitting backend address pool when adding secondary IP: it has an outbound rule already%s",
-			ipc, outboundRuleStr)
-	}
 	newIPConfiguration := &armnetwork.InterfaceIPConfiguration{
 		Name: &name,
 		Properties: &armnetwork.InterfaceIPConfigurationPropertiesFormat{
-			PrivateIPAddress:                &ipc,
-			PrivateIPAllocationMethod:       ptr.To(armnetwork.IPAllocationMethodStatic),
-			Subnet:                          networkInterface.Properties.IPConfigurations[0].Properties.Subnet,
-			Primary:                         &untrue,
-			LoadBalancerBackendAddressPools: loadBalancerBackendAddressPoolsArgument,
-			ApplicationSecurityGroups:       applicationSecurityGroups,
+			PrivateIPAddress:          &ipc,
+			PrivateIPAllocationMethod: ptr.To(armnetwork.IPAllocationMethodStatic),
+			Subnet:                    networkInterface.Properties.IPConfigurations[0].Properties.Subnet,
+			Primary:                   &untrue,
+			ApplicationSecurityGroups: applicationSecurityGroups,
 		},
 	}
 	for _, ipCfg := range ipConfigurations {
@@ -272,6 +215,8 @@ OuterLoop:
 	ipConfigurations = append(ipConfigurations, newIPConfiguration)
 	networkInterface.Properties.IPConfigurations = ipConfigurations
 	// Send the request
+	klog.Warningf("Egress IP %s will have no outbound connectivity except for the infrastructure subnet: "+
+		"omitting backend address pool when adding secondary IP", ipc)
 	poller, err := a.createOrUpdate(networkInterface)
 	if err != nil {
 		return err
@@ -488,46 +433,6 @@ func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]arm
 		return nil, NoNetworkInterfaceError
 	}
 	return networkInterfaces, nil
-}
-
-func splitObjectID(azureResourceID string) (resourceGroupName, loadBalancerName, backendAddressPoolName string) {
-	// example of an azureResourceID:
-	// "/subscriptions/53b8f551-f0fc-4bea-8cba-6d1fefd54c8a/resourceGroups/huirwang-debug1-2qh9t-rg/providers/Microsoft.Network/loadBalancers/huirwang-debug1-2qh9t/backendAddressPools/huirwang-debug1-2qh9t"
-
-	// Split the Azure resource ID into parts using "/"
-	parts := strings.Split(azureResourceID, "/")
-
-	// Iterate through the parts to find the relevant subIDs
-	for i, part := range parts {
-		switch part {
-		case "resourceGroups":
-			if i+1 < len(parts) {
-				resourceGroupName = parts[i+1]
-			}
-		case "loadBalancers":
-			if i+1 < len(parts) {
-				loadBalancerName = parts[i+1]
-			}
-		case "backendAddressPools":
-			if i+1 < len(parts) {
-				backendAddressPoolName = parts[i+1]
-			}
-		}
-	}
-	return
-}
-
-func (a *Azure) getBackendAddressPool(poolID string) (*armnetwork.BackendAddressPool, error) {
-	ctx, cancel := context.WithTimeout(a.ctx, defaultAzureOperationTimeout)
-	defer cancel()
-	resourceGroupName, loadBalancerName, backendAddressPoolName := splitObjectID(poolID)
-	response, err := a.backendAddressPoolClient.Get(ctx, resourceGroupName, loadBalancerName, backendAddressPoolName, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve backend address pool for backendAddressPoolClient=%s, loadBalancerName=%s, backendAddressPoolName=%s: %w",
-			resourceGroupName, loadBalancerName, backendAddressPoolName, err)
-	}
-	return &response.BackendAddressPool, nil
-
 }
 
 func (a *Azure) getNetworkInterface(id string) (armnetwork.Interface, error) {
