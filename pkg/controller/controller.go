@@ -39,6 +39,10 @@ const (
 
 type CloudNetworkConfigControllerIntf interface {
 	SyncHandler(key string) error
+	// InitialSync is called once after informer caches are synced but before workers start.
+	// Use this for one-time cleanup or initialization that requires access to the full
+	// state of the cluster (e.g., listing all existing resources).
+	InitialSync() error
 }
 
 type CloudNetworkConfigController struct {
@@ -95,6 +99,12 @@ func (c *CloudNetworkConfigController) Run(stopCh <-chan struct{}) error {
 	klog.Infof("Waiting for informer caches to sync for %s workqueue", c.controllerKey)
 	if ok := cache.WaitForCacheSync(stopCh, c.synced...); !ok {
 		return fmt.Errorf("failed to wait for caches to sync for %s workqueue", c.controllerKey)
+	}
+
+	// Perform one-time initial sync/cleanup before starting workers
+	klog.Infof("Running initial sync for %s controller", c.controllerKey)
+	if err := c.InitialSync(); err != nil {
+		return fmt.Errorf("initial sync failed for %s controller: %v", c.controllerKey, err)
 	}
 
 	klog.Infof("Starting %s workers", c.controllerKey)

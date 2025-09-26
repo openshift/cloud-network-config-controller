@@ -103,6 +103,10 @@ func (s *ConfigMapController) SyncHandler(key string) error {
 	return nil
 }
 
+func (s *ConfigMapController) InitialSync() error {
+	return nil
+}
+
 // shutdown is called in case we hit a configMap rotation. We need to: process all
 // in-flight requests and pause all our controllers for any further ones (since
 // we can't communicate with the cloud API using the old data anymore). I don't

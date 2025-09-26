@@ -103,6 +103,10 @@ func (s *SecretController) SyncHandler(key string) error {
 	return nil
 }
 
+func (s *SecretController) InitialSync() error {
+	return nil
+}
+
 // shutdown is called in case we hit a secret rotation. We need to: process all
 // in-flight requests and pause all our controllers for any further ones (since
 // we can't communicate with the cloud API using the old data anymore). I don't
