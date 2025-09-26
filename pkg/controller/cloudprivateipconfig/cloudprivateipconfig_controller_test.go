@@ -97,6 +97,7 @@ func (t *CloudPrivateIPConfigTestCase) NewFakeCloudPrivateIPConfigController() (
 		fakeCloudNetworkClient,
 		cloudNetworkInformerFactory.Cloud().V1().CloudPrivateIPConfigs(),
 		kubeInformerFactory.Core().V1().Nodes(),
+		cloudprovider.CloudProviderConfig{},
 	)
 	if err != nil {
 		return nil, err

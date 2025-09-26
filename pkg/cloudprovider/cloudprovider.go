@@ -134,7 +134,9 @@ func (n *NodeEgressIPConfiguration) String() string {
 	return fmt.Sprintf("%v", *n)
 }
 
-func NewCloudProviderClient(cfg CloudProviderConfig, platformStatus *configv1.PlatformStatus, featureGates featuregates.FeatureGate) (CloudProviderIntf, error) {
+func NewCloudProviderClient(cfg CloudProviderConfig,
+	platformStatus *configv1.PlatformStatus,
+	featureGates featuregates.FeatureGate) (CloudProviderIntf, error) {
 	var cloudProviderIntf CloudProviderIntf
 
 	// Initialize a separate context from the main context, rationale: cloud
