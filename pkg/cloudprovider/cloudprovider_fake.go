@@ -69,3 +69,7 @@ func (f *FakeCloudProvider) GetNodeEgressIPConfiguration(node *corev1.Node, clou
 	}
 	return nil, nil
 }
+
+func (a *FakeCloudProvider) SyncLBBackend(_ net.IP, _ *corev1.Node) error {
+	return nil
+}

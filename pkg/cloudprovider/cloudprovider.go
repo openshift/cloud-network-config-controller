@@ -4,15 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	apifeatures "github.com/openshift/api/features"
-	configv1 "github.com/openshift/api/config/v1"
-	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
 
 	v1 "github.com/openshift/api/cloudnetwork/v1"
+	configv1 "github.com/openshift/api/config/v1"
+	apifeatures "github.com/openshift/api/features"
+	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -60,6 +60,10 @@ type CloudProviderIntf interface {
 	// instance and IP family (AWS), also: the interface is either keyed by name
 	// (GCP) or ID (Azure, AWS).
 	GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error)
+
+	// SyncLBBackend removes any egress IP which is already added to backend pool of
+	// a public load balancer. This is mostly Azure specific and may be removed later.
+	SyncLBBackend(ip net.IP, node *corev1.Node) error
 }
 
 // CloudProviderWithMoveIntf is additional interface that can be added to cloud

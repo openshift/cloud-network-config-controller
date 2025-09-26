@@ -180,8 +180,14 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 
 	nodeNameToAdd, nodeNameToDel := c.computeOp(cloudPrivateIPConfig)
 	switch {
-	// Dequeue on NOOP, there's nothing to do
 	case nodeNameToAdd == "" && nodeNameToDel == "":
+		node, err := c.nodesLister.Get(cloudPrivateIPConfig.Spec.Node)
+		if err != nil {
+			return err
+		}
+		if err := c.cloudProviderClient.SyncLBBackend(ip, node); err != nil {
+			return fmt.Errorf("error while syncing egress IP %q added to LB backend pool", key)
+		}
 		return nil
 	case nodeNameToAdd != "" && nodeNameToDel != "":
 		klog.Infof("CloudPrivateIPConfig: %q will be moved from node %q to node %q", key, nodeNameToDel, nodeNameToAdd)
