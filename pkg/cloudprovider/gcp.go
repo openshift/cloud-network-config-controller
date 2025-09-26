@@ -201,6 +201,11 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[s
 	return nil, nil
 }
 
+func (g *GCP) SyncLBBackend(_ net.IP, _ *corev1.Node) error {
+	// We dont add Egress IP to GCP public LB backend; nothing to do
+	return nil
+}
+
 // The GCP zone operations API call. All GCP infrastructure modifications are
 // assigned a unique operation ID and are queued in a global/zone operations
 // queue. In the case of assignments of private IP addresses to instances, the

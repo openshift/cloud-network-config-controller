@@ -9,13 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
-	"k8s.io/utils/ptr"
-
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
@@ -26,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -51,6 +50,8 @@ type Azure struct {
 	nodeMapLock                  sync.Mutex
 	nodeLockMap                  map[string]*sync.Mutex
 	azureWorkloadIdentityEnabled bool
+	lbBackendPoolSynced          map[string]bool
+	lbBackendPoolSyncedLock      sync.Mutex
 }
 
 type azureCredentialsConfig struct {
@@ -172,11 +173,11 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	defer nodeLock.Unlock()
 	instance, err := a.getInstance(node)
 	if err != nil {
-		return err
+		return fmt.Errorf("error while retrieving instance details from Azure: %w", err)
 	}
 	networkInterfaces, err := a.getNetworkInterfaces(instance)
 	if err != nil {
-		return err
+		return fmt.Errorf("error while retrieving interface details from Azure: %w", err)
 	}
 	if networkInterfaces[0].Properties == nil {
 		return fmt.Errorf("nil network interface properties")
@@ -219,9 +220,18 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 		"omitting backend address pool when adding secondary IP", ipc)
 	poller, err := a.createOrUpdate(networkInterface)
 	if err != nil {
-		return err
+		return fmt.Errorf("error while updating network interface: %w", err)
 	}
-	return a.waitForCompletion(poller)
+	if err = a.waitForCompletion(poller); err != nil {
+		return fmt.Errorf("error while updating network interface: %w", err)
+	}
+	// setting lbBackendPoolSynced to true here to make sure that we dont try to
+	// sync LB backend for any new egress IP later
+	cacheKey := getIPCacheKey(ip, node)
+	a.lbBackendPoolSyncedLock.Lock()
+	a.lbBackendPoolSynced[cacheKey] = true
+	a.lbBackendPoolSyncedLock.Unlock()
+	return nil
 }
 
 func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
@@ -231,11 +241,11 @@ func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	defer nodeLock.Unlock()
 	instance, err := a.getInstance(node)
 	if err != nil {
-		return err
+		return fmt.Errorf("error while retrieving instance details from Azure: %w", err)
 	}
 	networkInterfaces, err := a.getNetworkInterfaces(instance)
 	if err != nil {
-		return err
+		return fmt.Errorf("error while retrieving interface details from Azure: %w", err)
 	}
 	// Perform the operation against the first interface listed, which will be
 	// the primary interface (if it's defined as such) or the first one returned
@@ -262,9 +272,16 @@ func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	// Send the request
 	poller, err := a.createOrUpdate(networkInterface)
 	if err != nil {
-		return err
+		return fmt.Errorf("error while updating network interface: %w", err)
 	}
-	return a.waitForCompletion(poller)
+	if err = a.waitForCompletion(poller); err != nil {
+		return fmt.Errorf("error while updating network interface: %w", err)
+	}
+	cacheKey := getIPCacheKey(ip, node)
+	a.lbBackendPoolSyncedLock.Lock()
+	delete(a.lbBackendPoolSynced, cacheKey)
+	a.lbBackendPoolSyncedLock.Unlock()
+	return nil
 }
 
 func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error) {
@@ -300,6 +317,65 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set
 		IP: ptr.To(a.getCapacity(networkInterface, cpicIPs)),
 	}
 	return []*NodeEgressIPConfiguration{config}, nil
+}
+
+// The consensus is to not add egress IP to public load balancer
+// backend pool regardless of the presence of an OutBoundRule.
+// During upgrade this function removes any egress IP added to
+// public load balancer backend pool previously.
+func (a *Azure) SyncLBBackend(ip net.IP, node *corev1.Node) error {
+	ipc := ip.String()
+	cacheKey := getIPCacheKey(ip, node)
+	a.lbBackendPoolSyncedLock.Lock()
+	if synced, ok := a.lbBackendPoolSynced[cacheKey]; ok && synced {
+		// nothing to do. Return immediately if LB backend has already synced
+		a.lbBackendPoolSyncedLock.Unlock()
+		return nil
+	}
+	a.lbBackendPoolSyncedLock.Unlock()
+	klog.Infof("Acquiring node lock for modifying load balancer backend pool, node: %s, ip: %s", node.Name, ipc)
+	nodeLock := a.getNodeLock(node.Name)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
+	instance, err := a.getInstance(node)
+	if err != nil {
+		return fmt.Errorf("error while retrieving instance details from Azure: %w", err)
+	}
+	networkInterfaces, err := a.getNetworkInterfaces(instance)
+	if err != nil {
+		return fmt.Errorf("error while retrieving interface details from Azure: %w", err)
+	}
+	if networkInterfaces[0].Properties == nil {
+		return fmt.Errorf("nil network interface properties")
+	}
+	// Perform the operation against the first interface listed, which will be
+	// the primary interface (if it's defined as such) or the first one returned
+	// following the order Azure specifies.
+	networkInterface := networkInterfaces[0]
+	var loadBalancerBackendPoolModified bool
+	// omit Egress IP from LB backend pool
+	ipConfigurations := networkInterface.Properties.IPConfigurations
+	for _, ipCfg := range ipConfigurations {
+		if ptr.Deref(ipCfg.Properties.PrivateIPAddress, "") == ipc &&
+			ipCfg.Properties.LoadBalancerBackendAddressPools != nil {
+			ipCfg.Properties.LoadBalancerBackendAddressPools = nil
+			loadBalancerBackendPoolModified = true
+		}
+	}
+	if loadBalancerBackendPoolModified {
+		networkInterface.Properties.IPConfigurations = ipConfigurations
+		poller, err := a.createOrUpdate(networkInterface)
+		if err != nil {
+			return fmt.Errorf("error while updating network interface: %w", err)
+		}
+		if err = a.waitForCompletion(poller); err != nil {
+			return fmt.Errorf("error while updating network interface: %w", err)
+		}
+		a.lbBackendPoolSyncedLock.Lock()
+		a.lbBackendPoolSynced[cacheKey] = true
+		a.lbBackendPoolSyncedLock.Unlock()
+	}
+	return nil
 }
 
 func (a *Azure) createOrUpdate(networkInterface armnetwork.Interface) (*runtime.Poller[armnetwork.InterfacesClientCreateOrUpdateResponse], error) {
@@ -603,4 +679,8 @@ func ParseCloudEnvironment(env azureapi.Environment) cloud.Configuration {
 		}
 	}
 	return cloudConfig
+}
+
+func getIPCacheKey(ip net.IP, node *corev1.Node) string {
+	return fmt.Sprintf("%s|%s", node.Name, ip.String())
 }
