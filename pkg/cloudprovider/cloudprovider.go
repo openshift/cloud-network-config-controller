@@ -67,6 +67,10 @@ type CloudProviderIntf interface {
 	// CleanupNode removes any internal state associated with the node.
 	// This should be called when a node is deleted.
 	CleanupNode(nodeName string)
+
+	// SyncLBBackend removes any egress IP which is already added to backend pool of
+	// a public load balancer. This is mostly Azure specific and may be removed later.
+	SyncLBBackend(ip net.IP, node *corev1.Node) error
 }
 
 // CloudProviderWithMoveIntf is additional interface that can be added to cloud
@@ -161,6 +165,7 @@ func NewCloudProviderClient(cfg CloudProviderConfig, platformStatus *configv1.Pl
 			platformStatus:               azurePlatformStatus,
 			nodeLockMap:                  make(map[string]*sync.Mutex),
 			azureWorkloadIdentityEnabled: featureGates.Enabled(apifeatures.FeatureGateAzureWorkloadIdentity),
+			lbBackendPoolSynced:          make(map[string]bool),
 		}
 	case PlatformTypeAWS:
 		cloudProviderIntf = &AWS{
