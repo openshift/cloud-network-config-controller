@@ -525,6 +525,39 @@ func TestSyncAddCloudPrivateIPConfig(t *testing.T) {
 				fmt.Sprintf("assign-%s-%s", cloudPrivateIPConfigName, nodeNameA),
 			},
 		},
+		{
+			name: "Should set error condition when node does not exist",
+			testObject: &cloudnetworkv1.CloudPrivateIPConfig{
+				ObjectMeta: v1.ObjectMeta{
+					Name: cloudPrivateIPConfigName,
+				},
+				Spec: cloudnetworkv1.CloudPrivateIPConfigSpec{
+					Node: "nonExistentNode",
+				},
+			},
+			expectedObject: &cloudnetworkv1.CloudPrivateIPConfig{
+				ObjectMeta: v1.ObjectMeta{
+					Name: cloudPrivateIPConfigName,
+					Finalizers: []string{
+						cloudPrivateIPConfigFinalizer,
+					},
+				},
+				Spec: cloudnetworkv1.CloudPrivateIPConfigSpec{
+					Node: "nonExistentNode",
+				},
+				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: "nonExistentNode",
+					Conditions: []v1.Condition{
+						{
+							Type:   string(cloudnetworkv1.Assigned),
+							Status: v1.ConditionFalse,
+							Reason: cloudResponseReasonError,
+						},
+					},
+				},
+			},
+			expectedTrackedState: []string{},
+		},
 	}
 	runTests(t, tests)
 }
@@ -1045,6 +1078,55 @@ func TestSyncUpdateCloudPrivateIPConfig(t *testing.T) {
 			isUpdate:                true,
 			mockCloudAssignError:    true,
 			expectErrorOnAssignSync: true,
+		},
+		{
+			name: "Should set error condition when target node does not exist during move",
+			testObject: &cloudnetworkv1.CloudPrivateIPConfig{
+				ObjectMeta: v1.ObjectMeta{
+					Name: cloudPrivateIPConfigName,
+					Finalizers: []string{
+						cloudPrivateIPConfigFinalizer,
+					},
+				},
+				Spec: cloudnetworkv1.CloudPrivateIPConfigSpec{
+					Node: "nonExistentNode",
+				},
+				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameA,
+					Conditions: []v1.Condition{
+						{
+							Type:   string(cloudnetworkv1.Assigned),
+							Status: v1.ConditionTrue,
+							Reason: cloudResponseReasonSuccess,
+						},
+					},
+				},
+			},
+			expectedObject: &cloudnetworkv1.CloudPrivateIPConfig{
+				ObjectMeta: v1.ObjectMeta{
+					Name: cloudPrivateIPConfigName,
+					Finalizers: []string{
+						cloudPrivateIPConfigFinalizer,
+					},
+				},
+				Spec: cloudnetworkv1.CloudPrivateIPConfigSpec{
+					Node: "nonExistentNode",
+				},
+				Status: cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: "nonExistentNode",
+					Conditions: []v1.Condition{
+						{
+							Type:   string(cloudnetworkv1.Assigned),
+							Status: v1.ConditionFalse,
+							Reason: cloudResponseReasonError,
+						},
+					},
+				},
+			},
+			expectedTrackedState: []string{
+				fmt.Sprintf("release-%s-%s", cloudPrivateIPConfigName, nodeNameA),
+			},
+			isUpdate: true,
 		},
 	}
 	runTests(t, tests)

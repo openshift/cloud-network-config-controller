@@ -318,27 +318,31 @@ func (o *OpenStack) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 // of nodeToAdd. Additionally, if reservation port is missing MovePrivateIP will attempt to recreate it (this is a
 // corner case and should not happen in normal operation).
 func (o *OpenStack) MovePrivateIP(ip net.IP, nodeToAdd, nodeToDel *corev1.Node) error {
-	if nodeToAdd == nil || nodeToDel == nil {
+	if nodeToAdd == nil {
 		return fmt.Errorf("invalid nil pointer provided for node when trying to move IP %s", ip.String())
 	}
 
-	// List all ports that are attached to this server.
-	serverID, err := getNovaServerIDFromProviderID(nodeToDel.Spec.ProviderID)
-	if err != nil {
-		return err
-	}
-	serverPorts, err := o.listNovaServerPorts(serverID)
-	if err != nil {
-		return err
-	}
+	if nodeToDel != nil {
+		// List all ports that are attached to this server.
+		serverID, err := getNovaServerIDFromProviderID(nodeToDel.Spec.ProviderID)
+		if err != nil {
+			return err
+		}
+		serverPorts, err := o.listNovaServerPorts(serverID)
+		if err != nil {
+			return err
+		}
 
-	// Loop over all ports that are attached to this nova instance.
-	for _, serverPort := range serverPorts {
-		if isIPAddressAllowedOnNeutronPort(serverPort, ip) {
-			if err = o.unallowIPAddressOnNeutronPort(serverPort.ID, ip); err != nil {
-				return err
+		// Loop over all ports that are attached to this nova instance.
+		for _, serverPort := range serverPorts {
+			if isIPAddressAllowedOnNeutronPort(serverPort, ip) {
+				if err = o.unallowIPAddressOnNeutronPort(serverPort.ID, ip); err != nil {
+					return err
+				}
 			}
 		}
+	} else {
+		klog.Infof("Source node not provided, not modifying existing reservations")
 	}
 
 	subnet, port, err := o.findAssignSubnetAndPort(ip, nodeToAdd)
@@ -348,7 +352,7 @@ func (o *OpenStack) MovePrivateIP(ip net.IP, nodeToAdd, nodeToDel *corev1.Node) 
 
 	// This call is to double-check if the reservation port exists and update its DeviceID. If reservation port is
 	// missing it will be recreated.
-	serverID, err = getNovaServerIDFromProviderID(nodeToAdd.Spec.ProviderID) // got to use new node's ProviderID now
+	serverID, err := getNovaServerIDFromProviderID(nodeToAdd.Spec.ProviderID) // got to use new node's ProviderID now
 	if err != nil {
 		return err
 	}

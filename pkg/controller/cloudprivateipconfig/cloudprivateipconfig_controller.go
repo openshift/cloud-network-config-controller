@@ -186,11 +186,34 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 	case nodeNameToAdd != "" && nodeNameToDel != "":
 		klog.Infof("CloudPrivateIPConfig: %q will be moved from node %q to node %q", key, nodeNameToDel, nodeNameToAdd)
 		nodeToDel, err := c.nodesLister.Get(nodeNameToDel)
-		if err != nil {
+		if err != nil && apierrors.IsNotFound(err) {
+			klog.Infof("Source node: %s no longer exists for CloudPrivateIPConfig: %q", nodeNameToDel, key)
+		} else if err != nil {
 			return err
 		}
+
 		nodeToAdd, err := c.nodesLister.Get(nodeNameToAdd)
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				klog.Errorf("Target node: %s does not exist for CloudPrivateIPConfig: %q", nodeNameToAdd, key)
+				status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameToDel,
+					Conditions: []metav1.Condition{
+						{
+							Type:               string(cloudnetworkv1.Assigned),
+							Status:             metav1.ConditionFalse,
+							ObservedGeneration: cloudPrivateIPConfig.Generation,
+							LastTransitionTime: metav1.Now(),
+							Reason:             cloudResponseReasonError,
+							Message:            fmt.Sprintf("Target node %q does not exist", nodeNameToAdd),
+						},
+					},
+				}
+				if _, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+					return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for non-existent target node, err: %v", key, err)
+				}
+				return nil
+			}
 			return err
 		}
 
@@ -213,6 +236,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 
 		// This is a blocking call. If the IP is not assigned then don't treat
 		// it as an error.
+		// If nodeToDel is nil (source node was deleted), we can still proceed with the move
 		withMover, ok := c.cloudProviderClient.(cloudprovider.CloudProviderWithMoveIntf)
 		if !ok {
 			return fmt.Errorf("cannot convert driver to the interface with move abilities, this should never happen")
@@ -389,6 +413,26 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 
 		node, err := c.nodesLister.Get(nodeNameToAdd)
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				klog.Errorf("Node: %s does not exist for CloudPrivateIPConfig: %q", nodeNameToAdd, key)
+				status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
+					Node: nodeNameToAdd,
+					Conditions: []metav1.Condition{
+						{
+							Type:               string(cloudnetworkv1.Assigned),
+							Status:             metav1.ConditionFalse,
+							ObservedGeneration: cloudPrivateIPConfig.Generation,
+							LastTransitionTime: metav1.Now(),
+							Reason:             cloudResponseReasonError,
+							Message:            fmt.Sprintf("Node %q does not exist", nodeNameToAdd),
+						},
+					},
+				}
+				if _, err = c.updateCloudPrivateIPConfigStatus(cloudPrivateIPConfig, status); err != nil {
+					return fmt.Errorf("error updating CloudPrivateIPConfig: %q status for non-existent node, err: %v", key, err)
+				}
+				return nil
+			}
 			return err
 		}
 

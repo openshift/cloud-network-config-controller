@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	coreinformers "k8s.io/client-go/informers/core/v1"
@@ -147,6 +148,10 @@ func (n *NodeController) SetNodeEgressIPConfigAnnotation(node *corev1.Node, node
 		// See: updateCloudPrivateIPConfigStatus
 		nodeLatest, err := n.kubeClient.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				klog.Infof("Node: %s no longer exists, stopping annotation update", node.Name)
+				return nil
+			}
 			return err
 		}
 		existingAnnotations := nodeLatest.Annotations
