@@ -224,6 +224,11 @@ func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConf
 	return []*NodeEgressIPConfiguration{config}, nil
 }
 
+func (a *AWS) SyncLBBackend(_ net.IP, _ *corev1.Node) error {
+	// We dont add Egress IP to AWS public LB backend; nothing to do
+	return nil
+}
+
 // Unfortunately the AWS API (WaitUntilInstanceRunning) only handles equality
 // assertion: so on delete we can't specify and assert that the IP which is
 // being removed is completely removed, we are forced to do the inverse, i.e:

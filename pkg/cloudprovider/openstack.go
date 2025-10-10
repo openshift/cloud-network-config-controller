@@ -545,6 +545,11 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 	return nil, fmt.Errorf("no suitable interface configurations found")
 }
 
+func (a *OpenStack) SyncLBBackend(_ net.IP, _ *corev1.Node) error {
+	// We dont add Egress IP to OpenStack public LB backend; nothing to do
+	return nil
+}
+
 // getNeutronPortNodeEgressIPConfiguration renders the NeutronPortNodeEgressIPConfiguration for a given port.
 // The interface is keyed by a neutron UUID.
 // If multiple IPv4 repectively multiple IPv6 subnets are attached to the same port, throw an error.
