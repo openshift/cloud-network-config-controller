@@ -3,13 +3,14 @@ package cloudprovider
 import (
 	"context"
 	"fmt"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
-	"k8s.io/utils/ptr"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
+	"k8s.io/utils/ptr"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
@@ -18,7 +19,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
-	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/msi-dataplane/pkg/dataplane"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
@@ -44,7 +44,7 @@ type Azure struct {
 	CloudProvider
 	platformStatus               *configv1.AzurePlatformStatus
 	resourceGroup                string
-	env                          azure.Environment
+	env                          azureapi.Environment
 	vmClient                     *armcompute.VirtualMachinesClient
 	virtualNetworkClient         *armnetwork.VirtualNetworksClient
 	networkClient                *armnetwork.InterfacesClient
@@ -124,13 +124,13 @@ func (a *Azure) initCredentials() error {
 
 	// Pick the Azure "Environment", which is just a named set of API endpoints.
 	if a.cfg.APIOverride != "" {
-		a.env, err = azure.EnvironmentFromURL(a.cfg.APIOverride)
+		a.env, err = azureapi.EnvironmentFromURL(a.cfg.APIOverride)
 	} else {
 		name := a.cfg.AzureEnvironment
 		if name == "" {
 			name = "AzurePublicCloud"
 		}
-		a.env, err = azure.EnvironmentFromName(name)
+		a.env, err = azureapi.EnvironmentFromName(name)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to initialize Azure environment: %w", err)
@@ -223,13 +223,13 @@ OuterLoop:
 				if err != nil {
 					return fmt.Errorf("error looking up backend address pool %s with ID %s: %v", ptr.Deref(pool.Name, ""), ptr.Deref(pool.ID, ""), err)
 				}
-				if realPool.Properties.LoadBalancerBackendAddresses != nil && len(realPool.Properties.LoadBalancerBackendAddresses) > 0 {
+				if len(realPool.Properties.LoadBalancerBackendAddresses) > 0 {
 					if realPool.Properties.OutboundRule != nil {
 						loadBalancerBackendAddressPoolsArgument = nil
 						attachedOutboundRule = realPool.Properties.OutboundRule
 						break OuterLoop
 					}
-					if realPool.Properties.OutboundRules != nil && len(realPool.Properties.OutboundRules) > 0 {
+					if len(realPool.Properties.OutboundRules) > 0 {
 						loadBalancerBackendAddressPoolsArgument = nil
 						attachedOutboundRule = (realPool.Properties.OutboundRules)[0]
 						break OuterLoop
@@ -447,7 +447,7 @@ func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]arm
 	if instance.Properties == nil || instance.Properties.NetworkProfile == nil {
 		return nil, NoNetworkInterfaceError
 	}
-	if instance.Properties.NetworkProfile.NetworkInterfaces == nil || len(instance.Properties.NetworkProfile.NetworkInterfaces) == 0 {
+	if len(instance.Properties.NetworkProfile.NetworkInterfaces) == 0 {
 		return nil, NoNetworkInterfaceError
 	}
 	networkInterfaces := []armnetwork.Interface{}
@@ -577,9 +577,15 @@ func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]*st
 	// FIXME: This might not work for IPv6.
 	if virtualNetwork.Properties != nil && virtualNetwork.Properties.Subnets != nil {
 		for _, vns := range virtualNetwork.Properties.Subnets {
-			if vns.Name != nil && vns.Properties.AddressPrefix != nil &&
-				ptr.Deref(vns.Name, "") == subnetName {
-				return []*string{vns.Properties.AddressPrefix}, nil
+			if vns.Name != nil && ptr.Deref(vns.Name, "") == subnetName {
+				if vns.Properties.AddressPrefix != nil {
+					return []*string{vns.Properties.AddressPrefix}, nil
+				}
+				// In some cases, addressPrefixes is set with single element.
+				// so use it when addressPrefix is not available.
+				if len(vns.Properties.AddressPrefixes) > 0 {
+					return vns.Properties.AddressPrefixes, nil
+				}
 			}
 		}
 	}
@@ -587,7 +593,7 @@ func (a *Azure) getAddressPrefixes(networkInterface armnetwork.Interface) ([]*st
 	if virtualNetwork.Properties.AddressSpace == nil {
 		return nil, fmt.Errorf("nil subnet address space")
 	}
-	if virtualNetwork.Properties.AddressSpace.AddressPrefixes == nil || len(virtualNetwork.Properties.AddressSpace.AddressPrefixes) == 0 {
+	if len(virtualNetwork.Properties.AddressSpace.AddressPrefixes) == 0 {
 		return nil, fmt.Errorf("no subnet address prefixes defined")
 	}
 	return virtualNetwork.Properties.AddressSpace.AddressPrefixes, nil
@@ -668,11 +674,11 @@ func getNameFromResourceID(id string) string {
 func ParseCloudEnvironment(env azureapi.Environment) cloud.Configuration {
 	var cloudConfig cloud.Configuration
 	switch env {
-	case azure.ChinaCloud:
+	case azureapi.ChinaCloud:
 		cloudConfig = cloud.AzureChina
-	case azure.USGovernmentCloud:
+	case azureapi.USGovernmentCloud:
 		cloudConfig = cloud.AzureGovernment
-	case azure.PublicCloud:
+	case azureapi.PublicCloud:
 		cloudConfig = cloud.AzurePublic
 	default: // AzureStackCloud
 		cloudConfig = cloud.Configuration{
