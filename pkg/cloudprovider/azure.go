@@ -3,13 +3,14 @@ package cloudprovider
 import (
 	"context"
 	"fmt"
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
-	"k8s.io/utils/ptr"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
+	"k8s.io/utils/ptr"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
@@ -351,7 +352,8 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPCo
 		config.IFAddr.IPv6 = v6Subnet.String()
 	}
 	config.Capacity = capacity{
-		IP: a.getCapacity(networkInterface, len(cloudPrivateIPConfigs)),
+		// IPv4 and IPv6 fields not used by Azure (uses IP-family-agnostic capacity)
+		IP: ptr.To(a.getCapacity(networkInterface, len(cloudPrivateIPConfigs))),
 	}
 	return []*NodeEgressIPConfiguration{config}, nil
 }
