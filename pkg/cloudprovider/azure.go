@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -333,7 +334,8 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPCo
 		config.IFAddr.IPv6 = v6Subnet.String()
 	}
 	config.Capacity = capacity{
-		IP: a.getCapacity(networkInterface, len(cloudPrivateIPConfigs)),
+		// IPv4 and IPv6 fields not used by Azure (uses IP-family-agnostic capacity)
+		IP: ptr.To(a.getCapacity(networkInterface, len(cloudPrivateIPConfigs))),
 	}
 	return []*NodeEgressIPConfiguration{config}, nil
 }
