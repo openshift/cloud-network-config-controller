@@ -7,11 +7,10 @@ import (
 	"net/url"
 	"strings"
 
-	v1 "github.com/openshift/api/cloudnetwork/v1"
 	google "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
-	utilnet "k8s.io/utils/net"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 )
 
@@ -155,7 +154,7 @@ func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	return g.waitForCompletion(project, zone, operation.Name)
 }
 
-func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
+func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error) {
 	_, _, instance, err := g.getInstance(node)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving instance associated with node, err: %v", err)
@@ -184,7 +183,7 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConf
 		}
 		config.Capacity = capacity{
 			// IPv4 and IPv6 fields not used by GCP (uses IP-family-agnostic capacity)
-			IP: ptr.To(g.getCapacity(networkInterface, len(cloudPrivateIPConfigs))),
+			IP: ptr.To(g.getCapacity(networkInterface, cpicIPs)),
 		}
 		return []*NodeEgressIPConfiguration{config}, nil //nolint:staticcheck
 	}
@@ -235,25 +234,22 @@ func (g *GCP) getSubnet(networkInterface *google.NetworkInterface) (*net.IPNet, 
 
 // Note: there is also a global "alias IP per VPC quota", but OpenShift clusters on
 // GCP seem to have that value defined to 15,000. So we can skip that.
-func (g *GCP) getCapacity(networkInterface *google.NetworkInterface, cloudPrivateIPsCount int) int {
-	currentIPv4Usage := 0
-	currentIPv6Usage := 0
+func (g *GCP) getCapacity(networkInterface *google.NetworkInterface, cpicIPs sets.Set[string]) int {
+	currentIPUsage := 0
 	for _, aliasIPRange := range networkInterface.AliasIpRanges {
+		var aliasIP net.IP
 		if assignedIP := net.ParseIP(aliasIPRange.IpCidrRange); assignedIP != nil {
-			if utilnet.IsIPv4(assignedIP) {
-				currentIPv4Usage++
-			} else {
-				currentIPv6Usage++
-			}
+			aliasIP = assignedIP
 		} else if _, assignedSubnet, err := net.ParseCIDR(aliasIPRange.IpCidrRange); err == nil {
-			if utilnet.IsIPv4CIDR(assignedSubnet) {
-				currentIPv4Usage++
-			} else {
-				currentIPv6Usage++
-			}
+			aliasIP = assignedSubnet.IP
+		}
+
+		if aliasIP != nil && !cpicIPs.Has(aliasIP.String()) {
+			currentIPUsage++
 		}
 	}
-	return defaultGCPPrivateIPCapacity + cloudPrivateIPsCount - currentIPv4Usage - currentIPv6Usage
+
+	return defaultGCPPrivateIPCapacity - currentIPUsage
 }
 
 // getInstance retrieves the GCP instance referred by the Node object.

@@ -10,6 +10,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -18,10 +19,10 @@ import (
 	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/klog/v2"
 
-	cloudnetworkv1 "github.com/openshift/api/cloudnetwork/v1"
 	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1"
 	cloudnetworklisters "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
+	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
 	controller "github.com/openshift/cloud-network-config-controller/pkg/controller"
 )
 
@@ -116,17 +117,25 @@ func (n *NodeController) SyncHandler(key string) error {
 	if err != nil {
 		return fmt.Errorf("error listing cloud private ip config, err: %v", err)
 	}
-	// Filter out cloudPrivateIPConfigs assigned to node (key) and write the entry
-	// into same slice starting from index 0, finally chop off unwanted entries
-	// when passing it into GetNodeEgressIPConfiguration.
-	index := 0
+	// Filter cloudPrivateIPConfigs that are associated with this node.
+	// Include CPICs where spec.node OR status.node matches, to handle transitions
+	// during move operations and avoid counting CPIC IPs as "consumed capacity".
+	// We need both spec.node and status.node because during a move operation:
+	// - The IP might still be on the old node (status.node) while spec.node has changed
+	// - The IP might already be on the new node (spec.node) while status.node hasn't updated
+	// Build set of CPIC-managed IP addresses for this node
+	// Include CPICs where spec.node OR status.node matches to handle transitions
+	cpicIPs := sets.New[string]()
 	for _, cloudPrivateIPConfig := range cloudPrivateIPConfigs {
-		if isAssignedCloudPrivateIPConfigOnNode(cloudPrivateIPConfig, key) {
-			cloudPrivateIPConfigs[index] = cloudPrivateIPConfig
-			index++
+		if cloudPrivateIPConfig.Spec.Node == key || cloudPrivateIPConfig.Status.Node == key {
+			ip, _, err := cloudprivateipconfig.NameToIP(cloudPrivateIPConfig.Name)
+			if err != nil {
+				return fmt.Errorf("error parsing CloudPrivateIPConfig %s: %v", cloudPrivateIPConfig.Name, err)
+			}
+			cpicIPs.Insert(ip.String())
 		}
 	}
-	nodeEgressIPConfigs, err := n.cloudProviderClient.GetNodeEgressIPConfiguration(node, cloudPrivateIPConfigs[:index])
+	nodeEgressIPConfigs, err := n.cloudProviderClient.GetNodeEgressIPConfiguration(node, cpicIPs)
 	if err != nil {
 		return fmt.Errorf("error retrieving the private IP configuration for node: %s, err: %v", node.Name, err)
 	}
@@ -170,18 +179,6 @@ func (n *NodeController) generateAnnotation(nodeEgressIPConfigs []*cloudprovider
 func taintKeyExists(taints []v1.Taint, taintKeyToMatch string) bool {
 	for _, taint := range taints {
 		if taint.Key == taintKeyToMatch {
-			return true
-		}
-	}
-	return false
-}
-
-func isAssignedCloudPrivateIPConfigOnNode(cloudPrivateIPConfig *cloudnetworkv1.CloudPrivateIPConfig, nodeName string) bool {
-	if cloudPrivateIPConfig.Status.Node != nodeName {
-		return false
-	}
-	for _, condition := range cloudPrivateIPConfig.Status.Conditions {
-		if condition.Type == string(cloudnetworkv1.Assigned) && condition.Status == metav1.ConditionTrue {
 			return true
 		}
 	}
