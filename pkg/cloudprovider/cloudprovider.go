@@ -13,8 +13,8 @@ import (
 	apifeatures "github.com/openshift/api/features"
 	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 
-	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 var (
@@ -60,7 +60,9 @@ type CloudProviderIntf interface {
 	// for all instance types and IP families (GCP, Azure) or variable per
 	// instance and IP family (AWS), also: the interface is either keyed by name
 	// (GCP) or ID (Azure, AWS).
-	GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error)
+	// The cpicIPs parameter is a set of IP addresses that are
+	// managed by CloudPrivateIPConfigs and should be excluded from capacity calculations.
+	GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error)
 }
 
 // CloudProviderWithMoveIntf is additional interface that can be added to cloud

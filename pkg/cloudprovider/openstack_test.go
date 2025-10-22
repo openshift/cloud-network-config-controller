@@ -18,7 +18,6 @@ import (
 	neutronsubnets "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	th "github.com/gophercloud/gophercloud/v2/testhelper"
 	testclient "github.com/gophercloud/gophercloud/v2/testhelper/client"
-	v1 "github.com/openshift/api/cloudnetwork/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -1017,7 +1016,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 	tcs := []struct {
 		port                  neutronports.Port
 		nodeEgressIPConfig    NodeEgressIPConfiguration
-		cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig
+		cloudPrivateIPConfigs []string
 		errString             string
 	}{
 		{
@@ -1045,11 +1044,8 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IP: ptr.To(openstackMaxCapacity + 3 - 2), // excluding 2 allowed_address_pairs configured on the port.
 				},
 			},
-			// Configure cloudPrivateIPConfigs with 3 ips are within neutron subnet, 1 ip outside neutron subnet.
-			cloudPrivateIPConfigs: []*v1.CloudPrivateIPConfig{{ObjectMeta: metav1.ObjectMeta{
-				Name: "192.0.2.10"}}, {ObjectMeta: metav1.ObjectMeta{Name: "2000..1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "2000..2"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "10.10.10.1"}}},
+			// Configure IPs with 3 ips are within neutron subnet, 1 ip outside neutron subnet.
+			cloudPrivateIPConfigs: []string{"192.0.2.10", "2000::1", "2000::2", "10.10.10.1"},
 		},
 		{
 			port:      portMap["aafecceb-d986-42b6-8ea7-449c7cacb7d9"],
@@ -1062,7 +1058,8 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 	}
 
 	for i, tc := range tcs {
-		nodeEgressIPConfig, err := o.getNeutronPortNodeEgressIPConfiguration(tc.port, tc.cloudPrivateIPConfigs)
+		cpicIPs := sets.New[string](tc.cloudPrivateIPConfigs...)
+		nodeEgressIPConfig, err := o.getNeutronPortNodeEgressIPConfiguration(tc.port, cpicIPs)
 		if err != nil {
 			if !strings.Contains(err.Error(), tc.errString) {
 				t.Fatalf("TestGetNeutronPortNodeEgressIPConfiguration(%d): Received unexpected error, err: %q, expected: %q", i, err, tc.errString)
