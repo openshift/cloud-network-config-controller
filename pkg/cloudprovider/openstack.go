@@ -567,7 +567,6 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port,
 	// Loop over all subnets. OpenStack potentially has several IPv4 or IPv6 subnets per port, but the
 	// CloudPrivateIPConfig expects only a single subnet of each address family per port. Throw an error
 	// in such a case.
-	var cloudPrivateIPsCount int
 	for _, s := range subnets {
 		// Parse CIDR information into ip and ipnet.
 		ip, ipnet, err = net.ParseCIDR(s.CIDR)
@@ -587,13 +586,14 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port,
 			}
 			ipv6 = ipnet.String()
 		}
-		// Loop over all cloudPrivateIPConfigs and check if they are part of this ipnet.
-		// If the IP is contained in the ipnet, increase cloudPrivateIPsCount.
-		for ipStr := range cpicIPs {
-			cip := net.ParseIP(ipStr)
-			if cip != nil && ipnet.Contains(cip) {
-				cloudPrivateIPsCount++
-			}
+	}
+
+	// Loop over all cloudPrivateIPConfigs and check if they are part of this port.
+	// If the IP is contained in the port, increase cloudPrivateIPsCount.
+	cloudPrivateIPsCount := 0
+	for _, portIP := range p.AllowedAddressPairs {
+		if cpicIPs.Has(portIP.IPAddress) {
+			cloudPrivateIPsCount++
 		}
 	}
 

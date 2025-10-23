@@ -65,6 +65,15 @@ var portMap = map[string]neutronports.Port{
 			{
 				IPAddress: "192.0.2.2",
 			},
+			{
+				IPAddress: "192.0.2.10",
+			},
+			{
+				IPAddress: "2000::1",
+			},
+			{
+				IPAddress: "2000::2",
+			},
 		},
 		DeviceID:    "9e5476bd-a4ec-4653-93d6-72c93aa682ba",
 		DeviceOwner: novaDeviceOwner,
@@ -1028,7 +1037,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IP: ptr.To(openstackMaxCapacity - 2), // 2 allowed_address_pairs configured on the port.
+					IP: ptr.To(openstackMaxCapacity - 5), // 5 allowed_address_pairs configured on the port.
 				},
 			},
 		},
@@ -1041,7 +1050,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IP: ptr.To(openstackMaxCapacity + 3 - 2), // excluding 2 allowed_address_pairs configured on the port.
+					IP: ptr.To(openstackMaxCapacity - 2), // excluding 2 allowed_address_pairs configured on the port.
 				},
 			},
 			// Configure IPs with 3 ips are within neutron subnet, 1 ip outside neutron subnet.
@@ -1096,23 +1105,23 @@ func TestAllowUnAllowIPAddressOnNeutronPort(t *testing.T) {
 		{
 			portID:     "9ab428d4-58f8-42d7-9672-90c3f5641f83",
 			ip:         net.ParseIP("192.0.2.20"),
-			allowedIPs: []string{"192.0.2.1", "192.0.2.2", "192.0.2.20"},
+			allowedIPs: []string{"192.0.2.1", "192.0.2.10", "192.0.2.2", "192.0.2.20", "2000::1", "2000::2"},
 		},
 		{
 			portID:     "9ab428d4-58f8-42d7-9672-90c3f5641f83",
 			ip:         net.ParseIP("192.0.2.21"),
-			allowedIPs: []string{"192.0.2.1", "192.0.2.2", "192.0.2.20", "192.0.2.21"},
+			allowedIPs: []string{"192.0.2.1", "192.0.2.10", "192.0.2.2", "192.0.2.20", "192.0.2.21", "2000::1", "2000::2"},
 		},
 		{
 			portID:     "9ab428d4-58f8-42d7-9672-90c3f5641f83",
 			ip:         net.ParseIP("192.0.2.20"),
 			unallow:    true,
-			allowedIPs: []string{"192.0.2.1", "192.0.2.2", "192.0.2.21"},
+			allowedIPs: []string{"192.0.2.1", "192.0.2.10", "192.0.2.2", "192.0.2.21", "2000::1", "2000::2"},
 		},
 		{
 			portID:     "9ab428d4-58f8-42d7-9672-90c3f5641f83",
 			ip:         net.ParseIP("192.0.2.21"),
-			allowedIPs: []string{"192.0.2.1", "192.0.2.2", "192.0.2.21"},
+			allowedIPs: []string{"192.0.2.1", "192.0.2.10", "192.0.2.2", "192.0.2.21", "2000::1", "2000::2"},
 			errString:  "the requested IP for assignment is already assigned",
 		},
 		{
@@ -1132,7 +1141,7 @@ func TestAllowUnAllowIPAddressOnNeutronPort(t *testing.T) {
 			portID:     "9ab428d4-58f8-42d7-9672-90c3f5641f83",
 			ip:         net.ParseIP("192.0.2.21"),
 			unallow:    true,
-			allowedIPs: []string{"192.0.2.1", "192.0.2.2"},
+			allowedIPs: []string{"192.0.2.1", "192.0.2.10", "192.0.2.2", "2000::1", "2000::2"},
 		},
 	}
 

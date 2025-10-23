@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -246,6 +247,7 @@ func (g *GCP) getSubnet(networkInterface *google.NetworkInterface) (*net.IPNet, 
 // Note: there is also a global "alias IP per VPC quota", but OpenShift clusters on
 // GCP seem to have that value defined to 15,000. So we can skip that.
 func (g *GCP) getCapacity(networkInterface *google.NetworkInterface, cpicIPs sets.Set[string]) int {
+	klog.Infof("getCapacity, existing cpicIPs: %+v", cpicIPs)
 	currentIPUsage := 0
 	for _, aliasIPRange := range networkInterface.AliasIpRanges {
 		var aliasIP net.IP
@@ -256,6 +258,7 @@ func (g *GCP) getCapacity(networkInterface *google.NetworkInterface, cpicIPs set
 		}
 
 		if aliasIP != nil && !cpicIPs.Has(aliasIP.String()) {
+			klog.Infof("getCapacity, assigned IP address %s", aliasIP.String())
 			currentIPUsage++
 		}
 	}
