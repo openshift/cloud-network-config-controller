@@ -103,9 +103,9 @@ type ifAddr struct {
 }
 
 type capacity struct {
-	IPv4 int `json:"ipv4,omitempty"`
-	IPv6 int `json:"ipv6,omitempty"`
-	IP   int `json:"ip,omitempty"`
+	IPv4 *int `json:"ipv4,omitempty"`
+	IPv6 *int `json:"ipv6,omitempty"`
+	IP   *int `json:"ip,omitempty"`
 }
 
 //  NodeEgressIPConfiguration stores details - specific to each cloud - which are
