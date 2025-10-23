@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 
 	google "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
@@ -30,7 +31,9 @@ const (
 // to the GCP cloud API
 type GCP struct {
 	CloudProvider
-	client *google.Service
+	client      *google.Service
+	nodeMapLock sync.Mutex
+	nodeLockMap map[string]*sync.Mutex
 }
 
 func (g *GCP) initCredentials() (err error) {
@@ -80,6 +83,10 @@ func (g *GCP) initCredentials() (err error) {
 // GCP can return 10.0.32.25/32 or 10.0.32.25 - we thus need to check for both
 // when validating that the IP provided doesn't already exist
 func (g *GCP) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
+	nodeLock := g.getNodeLock(node.Name)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
+
 	project, zone, instance, err := g.getInstance(node)
 	if err != nil {
 		return err
@@ -113,6 +120,10 @@ func (g *GCP) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 // Important: GCP IP aliases can come in all forms, i.e: if you add 10.0.32.25
 // GCP can return 10.0.32.25/32 or 10.0.32.25
 func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
+	nodeLock := g.getNodeLock(node.Name)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
+
 	project, zone, instance, err := g.getInstance(node)
 	if err != nil {
 		return err
@@ -312,4 +323,15 @@ func (g *GCP) parseSubnet(subnetURL string) (string, string, string, error) {
 	}
 	return subnetURLParts[len(subnetURLParts)-5], subnetURLParts[len(subnetURLParts)-3],
 		subnetURLParts[len(subnetURLParts)-1], nil
+}
+
+// getNodeLock retrieves node lock from nodeLockMap, If lock doesn't exist, then update map
+// with a new lock entry for the given node name.
+func (g *GCP) getNodeLock(nodeName string) *sync.Mutex {
+	g.nodeMapLock.Lock()
+	defer g.nodeMapLock.Unlock()
+	if _, ok := g.nodeLockMap[nodeName]; !ok {
+		g.nodeLockMap[nodeName] = &sync.Mutex{}
+	}
+	return g.nodeLockMap[nodeName]
 }

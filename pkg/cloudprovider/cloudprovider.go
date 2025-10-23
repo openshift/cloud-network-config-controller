@@ -165,6 +165,7 @@ func NewCloudProviderClient(cfg CloudProviderConfig, platformStatus *configv1.Pl
 	case PlatformTypeGCP:
 		cloudProviderIntf = &GCP{
 			CloudProvider: cp,
+			nodeLockMap:   make(map[string]*sync.Mutex),
 		}
 	case PlatformTypeOpenStack:
 		cloudProviderIntf = &OpenStack{
