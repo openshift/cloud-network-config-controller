@@ -14,8 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	v1 "github.com/openshift/api/cloudnetwork/v1"
-	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -181,7 +179,7 @@ func (a *AWS) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	}
 }
 
-func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
+func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error) {
 	instance, err := a.getInstance(node)
 	if err != nil {
 		return nil, err
@@ -214,10 +212,8 @@ func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConf
 	if v6Subnet != nil {
 		config.IFAddr.IPv6 = v6Subnet.String()
 	}
-	capV4, capV6, err := a.getCapacity(instanceV4Capacity, instanceV6Capacity, networkInterface, cloudPrivateIPConfigs)
-	if err != nil {
-		return nil, err
-	}
+
+	capV4, capV6 := a.getCapacity(instanceV4Capacity, instanceV6Capacity, networkInterface, cpicIPs)
 	config.Capacity = capacity{
 		IPv4: ptr.To(capV4),
 		IPv6: ptr.To(capV6),
@@ -304,32 +300,28 @@ func (a *AWS) getSubnet(networkInterface *ec2.InstanceNetworkInterface) (*net.IP
 
 // AWS uses a variable capacity per instance type, see:
 // https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#AvailableIpPerENI
-// Hence we need to retrieve that and then subtract the amount already assigned
-// by default.
-func (a *AWS) getCapacity(instanceV4Capacity, instanceV6Capacity int, networkInterface *ec2.InstanceNetworkInterface, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) (int, int, error) {
+// Capacity represents the number of IPs available for consumption.
+// We calculate this as: instance_limit - IPs_consumed_by_non_CPIC_sources
+// This way, CNCC managed IPs (regardless of their status) don't reduce capacity.
+func (a *AWS) getCapacity(instanceV4Capacity, instanceV6Capacity int, networkInterface *ec2.InstanceNetworkInterface, cpicIPs sets.Set[string]) (int, int) {
 	currentIPv4Usage, currentIPv6Usage := 0, 0
 	for _, assignedIPv6 := range networkInterface.Ipv6Addresses {
 		if assignedIP := net.ParseIP(*assignedIPv6.Ipv6Address); assignedIP != nil {
-			currentIPv6Usage++
+			if !cpicIPs.Has(assignedIP.String()) {
+				currentIPv6Usage++
+			}
 		}
 	}
+
 	for _, assignedIPv4 := range networkInterface.PrivateIpAddresses {
 		if assignedIP := net.ParseIP(*assignedIPv4.PrivateIpAddress); assignedIP != nil {
-			currentIPv4Usage++
+			if !cpicIPs.Has(assignedIP.String()) {
+				currentIPv4Usage++
+			}
 		}
 	}
-	for _, cloudPrivateIPConfig := range cloudPrivateIPConfigs {
-		_, ipFamily, err := cloudprivateipconfig.NameToIP(cloudPrivateIPConfig.Name)
-		if err != nil {
-			return 0, 0, err
-		}
-		if ipFamily == cloudprivateipconfig.IPv4 {
-			instanceV4Capacity++
-		} else if ipFamily == cloudprivateipconfig.IPv6 {
-			instanceV6Capacity++
-		}
-	}
-	return instanceV4Capacity - currentIPv4Usage, instanceV6Capacity - currentIPv6Usage, nil
+
+	return instanceV4Capacity - currentIPv4Usage, instanceV6Capacity - currentIPv6Usage
 }
 
 func (a *AWS) getNetworkInterfaces(instance *ec2.Instance) ([]*ec2.InstanceNetworkInterface, error) {
