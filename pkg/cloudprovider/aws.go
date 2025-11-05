@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -218,8 +219,9 @@ func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConf
 		return nil, err
 	}
 	config.Capacity = capacity{
-		IPv4: capV4,
-		IPv6: capV6,
+		IPv4: ptr.To(capV4),
+		IPv6: ptr.To(capV6),
+		// IP field not used by AWS (uses per-IP-family capacity)
 	}
 	return []*NodeEgressIPConfiguration{config}, nil
 }
