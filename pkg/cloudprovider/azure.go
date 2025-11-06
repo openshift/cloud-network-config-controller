@@ -662,6 +662,12 @@ func (a *Azure) getNodeLock(nodeName string) *sync.Mutex {
 	return a.nodeLockMap[nodeName]
 }
 
+func (a *Azure) CleanupNode(nodeName string) {
+	a.nodeMapLock.Lock()
+	defer a.nodeMapLock.Unlock()
+	delete(a.nodeLockMap, nodeName)
+}
+
 func getNameFromResourceID(id string) string {
 	return id[strings.LastIndex(id, "/"):]
 }
