@@ -447,6 +447,9 @@ func sharedCredentialsFileFromDirectory(dir string) (string, error) {
 	return f.Name(), nil
 }
 
+func (a *AWS) CleanupNode(nodeName string) {
+}
+
 // newConfigForStaticCreds is copied verbatim from:
 // https://github.com/openshift/cluster-ingress-operator/blob/1600a0e349ef075fcb52ab65b33445e256358ab8/pkg/util/aws/shared_credentials_file.go#L52
 func newConfigForStaticCreds(accessKey string, accessSecret string) []byte {
