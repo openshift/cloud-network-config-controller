@@ -61,6 +61,10 @@ type CloudProviderIntf interface {
 	// The cpicIPs parameter is a set of IP addresses that are
 	// managed by CloudPrivateIPConfigs and should be excluded from capacity calculations.
 	GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error)
+
+	// CleanupNode removes any internal state associated with the node.
+	// This should be called when a node is deleted.
+	CleanupNode(nodeName string)
 }
 
 // CloudProviderWithMoveIntf is additional interface that can be added to cloud

@@ -87,6 +87,8 @@ func NewNodeController(
 				controller.Enqueue(newN)
 			}
 		},
+		// Enqueue removals for cleanup purposes only
+		DeleteFunc: controller.Enqueue,
 	})
 	if err != nil {
 		return nil, err
@@ -103,6 +105,8 @@ func (n *NodeController) SyncHandler(key string) error {
 		// // A lister can only return ErrNotFound, which means: the Node
 		// resource no longer exist, in which case we stop processing.
 		klog.Infof("corev1.Node: '%s' in work queue no longer exists", key)
+		// Clean up any cloud provider state associated with this node
+		n.cloudProviderClient.CleanupNode(key)
 		return nil
 	}
 
