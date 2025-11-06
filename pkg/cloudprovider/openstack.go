@@ -999,3 +999,6 @@ func getNodeInternalAddrs(node *corev1.Node) (net.IP, net.IP) {
 	}
 	return v4Addr, v6Addr
 }
+
+func (o *OpenStack) CleanupNode(nodeName string) {
+}

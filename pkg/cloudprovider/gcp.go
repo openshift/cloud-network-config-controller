@@ -335,3 +335,9 @@ func (g *GCP) getNodeLock(nodeName string) *sync.Mutex {
 	}
 	return g.nodeLockMap[nodeName]
 }
+
+func (g *GCP) CleanupNode(nodeName string) {
+	g.nodeMapLock.Lock()
+	defer g.nodeMapLock.Unlock()
+	delete(g.nodeLockMap, nodeName)
+}
