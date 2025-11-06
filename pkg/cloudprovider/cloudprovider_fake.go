@@ -69,3 +69,6 @@ func (f *FakeCloudProvider) GetNodeEgressIPConfiguration(node *corev1.Node, cpic
 	}
 	return nil, nil
 }
+
+func (f *FakeCloudProvider) CleanupNode(nodeName string) {
+}
