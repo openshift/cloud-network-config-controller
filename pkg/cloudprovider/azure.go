@@ -22,9 +22,9 @@ import (
 	"github.com/Azure/go-autorest/autorest/azure"
 	azureapi "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/msi-dataplane/pkg/dataplane"
-	v1 "github.com/openshift/api/cloudnetwork/v1"
 	configv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -323,7 +323,7 @@ func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	return a.waitForCompletion(poller)
 }
 
-func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
+func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error) {
 	instance, err := a.getInstance(node)
 	if err != nil {
 		return nil, err
@@ -353,7 +353,7 @@ func (a *Azure) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPCo
 	}
 	config.Capacity = capacity{
 		// IPv4 and IPv6 fields not used by Azure (uses IP-family-agnostic capacity)
-		IP: ptr.To(a.getCapacity(networkInterface, len(cloudPrivateIPConfigs))),
+		IP: ptr.To(a.getCapacity(networkInterface, cpicIPs)),
 	}
 	return []*NodeEgressIPConfiguration{config}, nil
 }
@@ -409,18 +409,17 @@ func (a *Azure) getSubnet(networkInterface armnetwork.Interface) (*net.IPNet, *n
 // We need to retrieve the amounts assigned to the node by default and subtract
 // that from the default 256 value. Note: there is also a "Private IP addresses
 // per virtual network" quota, but that's 65.536, so we can skip that.
-func (a *Azure) getCapacity(networkInterface armnetwork.Interface, cloudPrivateIPsCount int) int {
-	currentIPv4Usage, currentIPv6Usage := 0, 0
+func (a *Azure) getCapacity(networkInterface armnetwork.Interface, cpicIPs sets.Set[string]) int {
+	currentIPUsage := 0
 	for _, ipConfiguration := range networkInterface.Properties.IPConfigurations {
 		if assignedIP := net.ParseIP(ptr.Deref(ipConfiguration.Properties.PrivateIPAddress, "")); assignedIP != nil {
-			if utilnet.IsIPv4(assignedIP) {
-				currentIPv4Usage++
-			} else {
-				currentIPv6Usage++
+			if !cpicIPs.Has(assignedIP.String()) {
+				currentIPUsage++
 			}
 		}
 	}
-	return defaultAzurePrivateIPCapacity + cloudPrivateIPsCount - currentIPv4Usage - currentIPv6Usage
+
+	return defaultAzurePrivateIPCapacity - currentIPUsage
 }
 
 // This is what the node's providerID looks like on Azure
@@ -661,6 +660,12 @@ func (a *Azure) getNodeLock(nodeName string) *sync.Mutex {
 		a.nodeLockMap[nodeName] = &sync.Mutex{}
 	}
 	return a.nodeLockMap[nodeName]
+}
+
+func (a *Azure) CleanupNode(nodeName string) {
+	a.nodeMapLock.Lock()
+	defer a.nodeMapLock.Unlock()
+	delete(a.nodeLockMap, nodeName)
 }
 
 func getNameFromResourceID(id string) string {
