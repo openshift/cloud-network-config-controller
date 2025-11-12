@@ -72,3 +72,7 @@ func (f *FakeCloudProvider) GetNodeEgressIPConfiguration(node *corev1.Node, cpic
 
 func (f *FakeCloudProvider) CleanupNode(nodeName string) {
 }
+
+func (f *FakeCloudProvider) SyncLBBackend(_ net.IP, _ *corev1.Node) error {
+	return nil
+}
