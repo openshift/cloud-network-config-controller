@@ -31,6 +31,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -593,7 +594,8 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port,
 			IPv6: ipv6,
 		},
 		Capacity: capacity{
-			IP: c,
+			// IPv4 and IPv6 fields not used by OpenStack (uses IP-family-agnostic capacity)
+			IP: ptr.To(c),
 		},
 	}, nil
 }
