@@ -22,12 +22,11 @@ import (
 	neutronsubnets "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	"github.com/gophercloud/gophercloud/v2/pagination"
 	"github.com/gophercloud/utils/v2/openstack/clientconfig"
-	v1 "github.com/openshift/api/cloudnetwork/v1"
-	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -473,7 +472,7 @@ func (o *OpenStack) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 // GetNodeEgressIPConfiguration retrieves the egress IP configuration for
 // the node, following the convention the cloud uses. This means
 // specifically for OpenStack that the interface is keyed by the port's neutron UUID.
-func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
+func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error) {
 	if node == nil {
 		return nil, fmt.Errorf("invalid nil pointer provided for node when trying to get node EgressIP configuration")
 	}
@@ -492,7 +491,7 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 	var configurations []*NodeEgressIPConfiguration
 	for _, p := range serverPorts {
 		// Retrieve configuration for this port.
-		config, err := o.getNeutronPortNodeEgressIPConfiguration(p, cloudPrivateIPConfigs)
+		config, err := o.getNeutronPortNodeEgressIPConfiguration(p, cpicIPs)
 		if err != nil {
 			return nil, err
 		}
@@ -553,7 +552,7 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivate
 // neutron operates as there is no such thing as a per port quota or limit. Therefore we set a ceiling of
 // `openstackMaxCapacity`. The number of unique IP addresses in allowed_address_pair and fixed_ips is subtracted from
 // that ceiling.
-func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) (*NodeEgressIPConfiguration, error) {
+func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port, cpicIPs sets.Set[string]) (*NodeEgressIPConfiguration, error) {
 	var ipv4, ipv6 string
 	var err error
 	var ip net.IP
@@ -568,7 +567,6 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port,
 	// Loop over all subnets. OpenStack potentially has several IPv4 or IPv6 subnets per port, but the
 	// CloudPrivateIPConfig expects only a single subnet of each address family per port. Throw an error
 	// in such a case.
-	var cloudPrivateIPsCount int
 	for _, s := range subnets {
 		// Parse CIDR information into ip and ipnet.
 		ip, ipnet, err = net.ParseCIDR(s.CIDR)
@@ -588,16 +586,14 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port,
 			}
 			ipv6 = ipnet.String()
 		}
-		// Loop over all cloudPrivateIPConfigs and check if they are part of this ipnet.
-		// If the IP is contained in the ipnet, increase cloudPrivateIPsCount.
-		for _, cpic := range cloudPrivateIPConfigs {
-			cip, _, err := cloudprivateipconfig.NameToIP(cpic.Name)
-			if err != nil {
-				return nil, err
-			}
-			if ipnet.Contains(cip) {
-				cloudPrivateIPsCount++
-			}
+	}
+
+	// Loop over all cloudPrivateIPConfigs and check if they are part of this port.
+	// If the IP is contained in the port, increase cloudPrivateIPsCount.
+	cloudPrivateIPsCount := 0
+	for _, portIP := range p.AllowedAddressPairs {
+		if cpicIPs.Has(portIP.IPAddress) {
+			cloudPrivateIPsCount++
 		}
 	}
 
@@ -1018,4 +1014,7 @@ func getNodeInternalAddrs(node *corev1.Node) (net.IP, net.IP) {
 		}
 	}
 	return v4Addr, v6Addr
+}
+
+func (o *OpenStack) CleanupNode(nodeName string) {
 }
