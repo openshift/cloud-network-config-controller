@@ -6,12 +6,12 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 
-	v1 "github.com/openshift/api/cloudnetwork/v1"
 	google "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
-	utilnet "k8s.io/utils/net"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 )
 
@@ -31,7 +31,9 @@ const (
 // to the GCP cloud API
 type GCP struct {
 	CloudProvider
-	client *google.Service
+	client      *google.Service
+	nodeMapLock sync.Mutex
+	nodeLockMap map[string]*sync.Mutex
 }
 
 func (g *GCP) initCredentials() (err error) {
@@ -81,6 +83,10 @@ func (g *GCP) initCredentials() (err error) {
 // GCP can return 10.0.32.25/32 or 10.0.32.25 - we thus need to check for both
 // when validating that the IP provided doesn't already exist
 func (g *GCP) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
+	nodeLock := g.getNodeLock(node.Name)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
+
 	project, zone, instance, err := g.getInstance(node)
 	if err != nil {
 		return err
@@ -114,6 +120,10 @@ func (g *GCP) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 // Important: GCP IP aliases can come in all forms, i.e: if you add 10.0.32.25
 // GCP can return 10.0.32.25/32 or 10.0.32.25
 func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
+	nodeLock := g.getNodeLock(node.Name)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
+
 	project, zone, instance, err := g.getInstance(node)
 	if err != nil {
 		return err
@@ -155,7 +165,7 @@ func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	return g.waitForCompletion(project, zone, operation.Name)
 }
 
-func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConfigs []*v1.CloudPrivateIPConfig) ([]*NodeEgressIPConfiguration, error) {
+func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error) {
 	_, _, instance, err := g.getInstance(node)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving instance associated with node, err: %v", err)
@@ -184,7 +194,7 @@ func (g *GCP) GetNodeEgressIPConfiguration(node *corev1.Node, cloudPrivateIPConf
 		}
 		config.Capacity = capacity{
 			// IPv4 and IPv6 fields not used by GCP (uses IP-family-agnostic capacity)
-			IP: ptr.To(g.getCapacity(networkInterface, len(cloudPrivateIPConfigs))),
+			IP: ptr.To(g.getCapacity(networkInterface, cpicIPs)),
 		}
 		return []*NodeEgressIPConfiguration{config}, nil //nolint:staticcheck
 	}
@@ -235,25 +245,22 @@ func (g *GCP) getSubnet(networkInterface *google.NetworkInterface) (*net.IPNet, 
 
 // Note: there is also a global "alias IP per VPC quota", but OpenShift clusters on
 // GCP seem to have that value defined to 15,000. So we can skip that.
-func (g *GCP) getCapacity(networkInterface *google.NetworkInterface, cloudPrivateIPsCount int) int {
-	currentIPv4Usage := 0
-	currentIPv6Usage := 0
+func (g *GCP) getCapacity(networkInterface *google.NetworkInterface, cpicIPs sets.Set[string]) int {
+	currentIPUsage := 0
 	for _, aliasIPRange := range networkInterface.AliasIpRanges {
+		var aliasIP net.IP
 		if assignedIP := net.ParseIP(aliasIPRange.IpCidrRange); assignedIP != nil {
-			if utilnet.IsIPv4(assignedIP) {
-				currentIPv4Usage++
-			} else {
-				currentIPv6Usage++
-			}
+			aliasIP = assignedIP
 		} else if _, assignedSubnet, err := net.ParseCIDR(aliasIPRange.IpCidrRange); err == nil {
-			if utilnet.IsIPv4CIDR(assignedSubnet) {
-				currentIPv4Usage++
-			} else {
-				currentIPv6Usage++
-			}
+			aliasIP = assignedSubnet.IP
+		}
+
+		if aliasIP != nil && !cpicIPs.Has(aliasIP.String()) {
+			currentIPUsage++
 		}
 	}
-	return defaultGCPPrivateIPCapacity + cloudPrivateIPsCount - currentIPv4Usage - currentIPv6Usage
+
+	return defaultGCPPrivateIPCapacity - currentIPUsage
 }
 
 // getInstance retrieves the GCP instance referred by the Node object.
@@ -316,4 +323,21 @@ func (g *GCP) parseSubnet(subnetURL string) (string, string, string, error) {
 	}
 	return subnetURLParts[len(subnetURLParts)-5], subnetURLParts[len(subnetURLParts)-3],
 		subnetURLParts[len(subnetURLParts)-1], nil
+}
+
+// getNodeLock retrieves node lock from nodeLockMap, If lock doesn't exist, then update map
+// with a new lock entry for the given node name.
+func (g *GCP) getNodeLock(nodeName string) *sync.Mutex {
+	g.nodeMapLock.Lock()
+	defer g.nodeMapLock.Unlock()
+	if _, ok := g.nodeLockMap[nodeName]; !ok {
+		g.nodeLockMap[nodeName] = &sync.Mutex{}
+	}
+	return g.nodeLockMap[nodeName]
+}
+
+func (g *GCP) CleanupNode(nodeName string) {
+	g.nodeMapLock.Lock()
+	defer g.nodeMapLock.Unlock()
+	delete(g.nodeLockMap, nodeName)
 }
