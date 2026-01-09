@@ -153,6 +153,7 @@ func main() {
 					cloudNetworkClient,
 					cloudNetworkInformerFactory.Cloud().V1().CloudPrivateIPConfigs(),
 					kubeInformerFactory.Core().V1().Nodes(),
+					platformCfg,
 				)
 				if err != nil {
 					klog.Fatalf("Error getting cloud private ip controller, err: %v", err)

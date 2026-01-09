@@ -56,6 +56,9 @@ type CloudPrivateIPConfigController struct {
 	// down to all API client calls as to make sure all in-flight calls get
 	// cancelled if the main context is
 	ctx context.Context
+	// initialSyncHook is an optional function called during InitialSync for
+	// cloud-provider-specific cleanup. If nil, no cleanup is performed.
+	initialSyncHook func() error
 }
 
 // NewCloudPrivateIPConfigController returns a new CloudPrivateIPConfig controller
@@ -64,7 +67,8 @@ func NewCloudPrivateIPConfigController(
 	cloudProviderClient cloudprovider.CloudProviderIntf,
 	cloudNetworkClientset cloudnetworkclientset.Interface,
 	cloudPrivateIPConfigInformer cloudnetworkinformers.CloudPrivateIPConfigInformer,
-	nodeInformer coreinformers.NodeInformer) (*controller.CloudNetworkConfigController, error) {
+	nodeInformer coreinformers.NodeInformer,
+	cfg cloudprovider.CloudProviderConfig) (*controller.CloudNetworkConfigController, error) {
 
 	cloudPrivateIPConfigController := &CloudPrivateIPConfigController{
 		nodesLister:                nodeInformer.Lister(),
@@ -73,6 +77,14 @@ func NewCloudPrivateIPConfigController(
 		cloudPrivateIPConfigLister: cloudPrivateIPConfigInformer.Lister(),
 		ctx:                        controllerContext,
 	}
+
+	if cfg.PlatformType == cloudprovider.PlatformTypeAzure {
+		azureClient := cloudProviderClient.(*cloudprovider.Azure)
+		cloudPrivateIPConfigController.initialSyncHook = func() error {
+			return azureClient.SyncLBBackend(cloudPrivateIPConfigInformer.Lister(), nodeInformer.Lister())
+		}
+	}
+
 	controller := controller.NewCloudNetworkConfigController(
 		[]cache.InformerSynced{cloudPrivateIPConfigInformer.Informer().HasSynced, nodeInformer.Informer().HasSynced},
 		cloudPrivateIPConfigController,
@@ -114,6 +126,17 @@ func NewCloudPrivateIPConfigController(
 		return nil, err
 	}
 	return controller, nil
+}
+
+// InitialSync performs one-time cleanup on startup.
+// This is called after informer caches are synced but before workers start processing items.
+// If an initialSyncHook was provided, it will be called to perform cloud-provider-specific cleanup.
+func (c *CloudPrivateIPConfigController) InitialSync() error {
+	if c.initialSyncHook == nil {
+		return nil
+	}
+	klog.Info("Running initial CloudPrivateIPConfig sync/cleanup")
+	return c.initialSyncHook()
 }
 
 // syncHandler compares the actual state with the desired, and attempts to

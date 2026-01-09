@@ -22,8 +22,8 @@ import (
 
 	cloudnetworkinformers "github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1"
 	cloudnetworklisters "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
-	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
 	"github.com/openshift/cloud-network-config-controller/pkg/cloudprivateipconfig"
+	cloudprovider "github.com/openshift/cloud-network-config-controller/pkg/cloudprovider"
 	controller "github.com/openshift/cloud-network-config-controller/pkg/controller"
 )
 
@@ -181,6 +181,10 @@ func (n *NodeController) generateAnnotation(nodeEgressIPConfigs []*cloudprovider
 		return "", fmt.Errorf("error serializing cloud subnet annotation, err: %v", err)
 	}
 	return string(serialized), nil
+}
+
+func (n *NodeController) InitialSync() error {
+	return nil
 }
 
 // TaintKeyExists checks if the given taint key exists in list of taints. Returns true if exists false otherwise.
