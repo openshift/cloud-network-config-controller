@@ -18,9 +18,9 @@ import (
 )
 
 var (
-	NoNetworkInterfaceError  = errors.New("no retrievable network interface")
-	AlreadyExistingIPError   = errors.New("the requested IP for assignment is already assigned")
-	NonExistingIPError       = errors.New("the requested IP for removal is not assigned")
+	ErrNoNetworkInterface    = errors.New("no retrievable network interface")
+	ErrAlreadyExistingIP     = errors.New("the requested IP for assignment is already assigned")
+	ErrNonExistingIP         = errors.New("the requested IP for removal is not assigned")
 	UnexpectedURIErrorString = "the URI is not expected"
 )
 
@@ -44,7 +44,7 @@ type CloudProviderIntf interface {
 	// instance corresponding to the corev1.Node provided on the cloud the
 	// cluster is deployed on. NOTE: this operation is only performed against
 	// the first network interface defined for the VM. It will return an
-	// AlreadyExistingIPError if the IP provided is already associated with the
+	// ErrAlreadyExistingIP if the IP provided is already associated with the
 	// node, it's up to the caller to decide what to do with that.
 	AssignPrivateIP(ip net.IP, node *corev1.Node) error
 

@@ -216,7 +216,7 @@ func (a *Azure) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 				klog.Errorf("Failed to marshall the ip configuration: %v", err)
 			}
 			klog.Warningf("IP: %s is already assigned to node: %s with the ip configuration: %s", ipc, node.Name, json)
-			return AlreadyExistingIPError
+			return ErrAlreadyExistingIP
 		}
 	}
 	ipConfigurations = append(ipConfigurations, newIPConfiguration)
@@ -263,7 +263,7 @@ func (a *Azure) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	}
 	// Short-circuit if the IP never existed to begin with
 	if !ipAssigned {
-		return NonExistingIPError
+		return ErrNonExistingIP
 	}
 	networkInterface.Properties.IPConfigurations = keepIPConfiguration
 	// Send the request
@@ -465,10 +465,10 @@ func (a *Azure) getInstance(node *corev1.Node) (*armcompute.VirtualMachine, erro
 // primary one first, if it exists, else in the order assigned by Azure.
 func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]armnetwork.Interface, error) {
 	if instance.Properties == nil || instance.Properties.NetworkProfile == nil {
-		return nil, NoNetworkInterfaceError
+		return nil, ErrNoNetworkInterface
 	}
 	if len(instance.Properties.NetworkProfile.NetworkInterfaces) == 0 {
-		return nil, NoNetworkInterfaceError
+		return nil, ErrNoNetworkInterface
 	}
 	networkInterfaces := []armnetwork.Interface{}
 	// Try to get the ID corresponding to the "primary" NIC and put that first
@@ -505,7 +505,7 @@ func (a *Azure) getNetworkInterfaces(instance *armcompute.VirtualMachine) ([]arm
 			networkInterfaces = append(networkInterfaces, intf)
 			return networkInterfaces, nil
 		}
-		return nil, NoNetworkInterfaceError
+		return nil, ErrNoNetworkInterface
 	}
 	return networkInterfaces, nil
 }

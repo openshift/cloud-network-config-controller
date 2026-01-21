@@ -198,12 +198,12 @@ func (o *OpenStack) findAssignSubnetAndPort(ip net.IP, node *corev1.Node) (*neut
 	// that are attached to the port's network.
 	for _, serverPort := range serverPorts {
 		// If this IP address is already allowed on the port (speak: part of allowed_address_pairs),
-		// then return an AlreadyExistingIPError and skip all further steps.
+		// then return an ErrAlreadyExistingIP and skip all further steps.
 		if isIPAddressAllowedOnNeutronPort(serverPort, ip) {
 			// This is part of normal operation.
 			// Callers will likely ignore this and go on with their business logic and
 			// report success to the user.
-			return nil, nil, AlreadyExistingIPError
+			return nil, nil, ErrAlreadyExistingIP
 		}
 
 		// Get all subnets that are attached to this port.
@@ -218,10 +218,6 @@ func (o *OpenStack) findAssignSubnetAndPort(ip net.IP, node *corev1.Node) (*neut
 		// 3) Throw an error if the IP address does not fit in any of the attached network's subnets.
 		var matchingSubnet *neutronsubnets.Subnet
 		for _, s := range subnets {
-			// Because we're dealing with a pointer here for matchingSubnet:
-			// we must reassign s:= s or we'd overwrite the content that we point
-			// to.
-			s := s
 			// 1) Loop over all subnets and check if the IP address matches the subnet CIDR. If the IP
 			//    addresses matches multiple subnets on the same server port, then something is wrong
 			//    with this server's configuration and we should refuse to continue by throwing an error.
@@ -257,7 +253,7 @@ func (o *OpenStack) findAssignSubnetAndPort(ip net.IP, node *corev1.Node) (*neut
 // to the server. In case that an instance has 2 interfaces with the same CIDR
 // that this IP address could fit in, the first interface that is found will be used.
 // No guarantees about the correct interface ordering are given in such a case.
-// Throw an AlreadyExistingIPError if the IP provided is already associated with the
+// Throw an ErrAlreadyExistingIP if the IP provided is already associated with the
 // node, it's up to the caller to decide what to do with that.
 // NOTE: For OpenStack, this is a 2 step operation which is not atomic:
 //
@@ -288,7 +284,7 @@ func (o *OpenStack) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	}
 	// Then, add the IP address to the port's allowed_address_pairs.
 	//    TODO: use a more elegant retry mechanism.
-	if err = o.allowIPAddressOnNeutronPort(matchingPort.ID, ip); err != nil && !errors.Is(err, AlreadyExistingIPError) {
+	if err = o.allowIPAddressOnNeutronPort(matchingPort.ID, ip); err != nil && !errors.Is(err, ErrAlreadyExistingIP) {
 		// Try to clean up the allocated port if adding the IP to allowed_address_pairs failed.
 		// Try this 10 times, but if this operation fails more than that, then user intervention is needed or
 		// the upper layer must call ReleasePrivateIP (because if the neutron port exists and holds
@@ -361,7 +357,7 @@ func (o *OpenStack) MovePrivateIP(ip net.IP, nodeToAdd, nodeToDel *corev1.Node) 
 		return err
 	}
 
-	if err = o.allowIPAddressOnNeutronPort(port.ID, ip); err != nil && !errors.Is(err, AlreadyExistingIPError) {
+	if err = o.allowIPAddressOnNeutronPort(port.ID, ip); err != nil && !errors.Is(err, ErrAlreadyExistingIP) {
 		return fmt.Errorf("could not allow IP address %s on port %s, err: %q", ip.String(), port.ID, err)
 	}
 	return nil
@@ -379,7 +375,7 @@ func (o *OpenStack) MovePrivateIP(ip net.IP, nodeToAdd, nodeToDel *corev1.Node) 
 // These different subnets can then be assigned to ports on the same server.
 // Hence, a server could be connected to several ports where the same IP is part of the
 // allowed_address_pairs and where the same IP is reserved in neutron.
-// NOTE: If the IP is non-existant: it returns an NonExistingIPError. The caller will
+// NOTE: If the IP is non-existant: it returns an ErrNonExistingIP. The caller will
 // likely want to ignore such an error and continue its normal operation.
 func (o *OpenStack) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	if node == nil {
@@ -408,7 +404,7 @@ func (o *OpenStack) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 		//       b) If so, check if the the IP address is inside the subnet.
 		//          c) If so, release the IP allocation = delete the unbound neutron port inside the subnet.
 		// 3) The IP address is not part of any attached subnet and it's not part of any allowed_address_pair
-		// on any of the ports that are attached to the server. In that case, return a NonExistingIPError.
+		// on any of the ports that are attached to the server. In that case, return a ErrNonExistingIP.
 		// This is part of normal operation and upper layers should ignore this error and go on with normal
 		// business logic.
 		// Mind that if 1) fails and returns an error, then this method will return the error and
@@ -467,7 +463,7 @@ func (o *OpenStack) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	if !isFound {
 		// This is part of normal operation.
 		// Callers will likely ignore this and go on with normal operation.
-		return NonExistingIPError
+		return ErrNonExistingIP
 	}
 
 	return nil
@@ -789,7 +785,7 @@ func (o *OpenStack) allowIPAddressOnNeutronPort(portID string, ip net.IP) error 
 
 		// Sanity check to see if the IP is already inside the port's allowed_address_pairs.
 		if isIPAddressAllowedOnNeutronPort(*p, ip) {
-			return AlreadyExistingIPError
+			return ErrAlreadyExistingIP
 		}
 
 		// Update the port's allowed_address_pairs by appending to it.

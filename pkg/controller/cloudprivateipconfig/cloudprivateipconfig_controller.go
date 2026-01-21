@@ -340,7 +340,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		if node != nil {
 			// This is a blocking call. If the IP is not assigned then don't treat
 			// it as an error.
-			if releaseErr := c.cloudProviderClient.ReleasePrivateIP(ip, node); releaseErr != nil && !errors.Is(releaseErr, cloudprovider.NonExistingIPError) {
+			if releaseErr := c.cloudProviderClient.ReleasePrivateIP(ip, node); releaseErr != nil && !errors.Is(releaseErr, cloudprovider.ErrNonExistingIP) {
 				// Delete operation encountered an error, requeue
 				status = &cloudnetworkv1.CloudPrivateIPConfigStatus{
 					Node: nodeNameToDel,
@@ -462,7 +462,7 @@ func (c *CloudPrivateIPConfigController) SyncHandler(key string) error {
 		// This is a blocking call. If the IP is assigned (for ex: in case we
 		// were killed during the last sync but managed sending the cloud
 		// request away prior to that) then don't treat it as an error.
-		if assignErr := c.cloudProviderClient.AssignPrivateIP(ip, node); assignErr != nil && !errors.Is(assignErr, cloudprovider.AlreadyExistingIPError) {
+		if assignErr := c.cloudProviderClient.AssignPrivateIP(ip, node); assignErr != nil && !errors.Is(assignErr, cloudprovider.ErrAlreadyExistingIP) {
 			// If we couldn't even execute the assign request, set the status to
 			// failed.
 			status = &cloudnetworkv1.CloudPrivateIPConfigStatus{

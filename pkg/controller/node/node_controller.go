@@ -7,7 +7,6 @@ import (
 	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -189,7 +188,7 @@ func (n *NodeController) InitialSync() error {
 
 // TaintKeyExists checks if the given taint key exists in list of taints. Returns true if exists false otherwise.
 // Copied from k8s.io/kubernetes/pkg/util/taints/taints.go to avoid dependency hell.
-func taintKeyExists(taints []v1.Taint, taintKeyToMatch string) bool {
+func taintKeyExists(taints []corev1.Taint, taintKeyToMatch string) bool {
 	for _, taint := range taints {
 		if taint.Key == taintKeyToMatch {
 			return true
