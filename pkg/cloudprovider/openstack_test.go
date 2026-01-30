@@ -14,7 +14,6 @@ import (
 	novaservers "github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
 	neutronnetworks "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
 	neutronports "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
-	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	neutronsubnets "github.com/gophercloud/gophercloud/v2/openstack/networking/v2/subnets"
 	th "github.com/gophercloud/gophercloud/v2/testhelper"
 	testclient "github.com/gophercloud/gophercloud/v2/testhelper/client"
@@ -357,7 +356,7 @@ func HandleServerGet(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fmt.Fprint(w, string(out))
+			_, _ = fmt.Fprint(w, string(out))
 		})
 	}
 }
@@ -380,13 +379,13 @@ func HandleSubnetList(t *testing.T) {
 		}
 
 		var out []byte
-		out, err := json.Marshal(map[string][]subnets.Subnet{
+		out, err := json.Marshal(map[string][]neutronsubnets.Subnet{
 			"subnets": subnetList,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		fmt.Fprint(w, string(out))
+		_, _ = fmt.Fprint(w, string(out))
 	})
 }
 
@@ -458,7 +457,7 @@ func portListHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Fprint(w, string(out))
+	_, _ = fmt.Fprint(w, string(out))
 }
 
 func portCreationHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
@@ -489,7 +488,7 @@ func portCreationHandler(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	}
 	if !networkFound {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 		return
 	}
 	// Now, check if the subnet exists
@@ -505,7 +504,7 @@ outer:
 	}
 	if !subnetFound {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 		return
 	}
 
@@ -547,7 +546,7 @@ outer:
 		t.Fatalf("Unexpected error during marshal operation, err: %q", err)
 	}
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, string(b))
+	_, _ = fmt.Fprint(w, string(b))
 }
 
 func HandlePortGetUpdateDelete(t *testing.T, portID string) {
@@ -572,7 +571,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 			if r.Method == "DELETE" {
 				delete(portMap, portID)
 				w.WriteHeader(http.StatusAccepted)
-				fmt.Fprint(w, "")
+				_, _ = fmt.Fprint(w, "")
 				return
 			}
 
@@ -588,7 +587,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				fmt.Fprint(w, string(out))
+				_, _ = fmt.Fprint(w, string(out))
 				return
 			}
 
@@ -607,7 +606,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 			updateCounter++
 			if updateCounter%2 == 1 {
 				w.WriteHeader(http.StatusPreconditionFailed)
-				fmt.Fprint(w, "RevisionNumberConstraintFailed")
+				_, _ = fmt.Fprint(w, "RevisionNumberConstraintFailed")
 				return
 			}
 
@@ -630,7 +629,7 @@ func HandlePortGetUpdateDelete(t *testing.T, portID string) {
 				t.Fatalf("Unexpected error during marshal operation, err: %q", err)
 			}
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, string(b))
+			_, _ = fmt.Fprint(w, string(b))
 		})
 	}
 
@@ -1245,7 +1244,7 @@ func TestReserveAndReleaseNeutronIPAddress(t *testing.T) {
 		},
 		// Create a port on an invalid subnet.
 		{
-			subnet: subnets.Subnet{
+			subnet: neutronsubnets.Subnet{
 				ID:        "de0cda14-6ac6-4439-bc94-da0a27938b7a", // non existing subnet
 				NetworkID: "57d1274f-4717-43f1-88ec-0944546a14ef",
 			},
@@ -1256,7 +1255,7 @@ func TestReserveAndReleaseNeutronIPAddress(t *testing.T) {
 		},
 		// Create a port on an invalid network.
 		{
-			subnet: subnets.Subnet{
+			subnet: neutronsubnets.Subnet{
 				ID:        "de0cda14-6ac6-4439-bc94-da0a27938b7b",
 				NetworkID: "57d1274f-4717-43f1-88ec-0944546a14ee", // non existing network
 			},

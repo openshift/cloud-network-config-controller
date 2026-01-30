@@ -75,7 +75,7 @@ func (a *AWS) initCredentials() error {
 // AssignPrivateIP assigns the IP address to the node by re-providing all
 // existing ones + the new one. It does this on a per-IP-family basis (since the
 // AWS API is separated per family). If the IP is already existing: it returns an
-// AlreadyExistingIPError.
+// ErrAlreadyExistingIP.
 func (a *AWS) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	instance, err := a.getInstance(node)
 	if err != nil {
@@ -92,7 +92,7 @@ func (a *AWS) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	if utilnet.IsIPv6(ip) {
 		for _, assignedIPv6 := range networkInterface.Ipv6Addresses {
 			if assignedIP := net.ParseIP(*assignedIPv6.Ipv6Address); assignedIP != nil && assignedIP.Equal(ip) {
-				return AlreadyExistingIPError
+				return ErrAlreadyExistingIP
 			}
 		}
 		input := ec2.AssignIpv6AddressesInput{
@@ -108,7 +108,7 @@ func (a *AWS) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	} else {
 		for _, assignedIPv4 := range networkInterface.PrivateIpAddresses {
 			if assignedIP := net.ParseIP(*assignedIPv4.PrivateIpAddress); assignedIP != nil && assignedIP.Equal(ip) {
-				return AlreadyExistingIPError
+				return ErrAlreadyExistingIP
 			}
 		}
 		inputV4 := ec2.AssignPrivateIpAddressesInput{
@@ -126,7 +126,7 @@ func (a *AWS) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 
 // ReleasePrivateIP un-assigns the IP address from the node. It does this on a
 // per-IP-family basis (since the AWS API is separated per family).  If the IP
-// is non-existant: it returns an NonExistingIPError.
+// is non-existant: it returns an ErrNonExistingIP.
 func (a *AWS) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	instance, err := a.getInstance(node)
 	if err != nil {
@@ -147,7 +147,7 @@ func (a *AWS) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 			}
 		}
 		if len(deleteIPs) == 0 {
-			return NonExistingIPError
+			return ErrNonExistingIP
 		}
 		input := ec2.UnassignIpv6AddressesInput{
 			NetworkInterfaceId: networkInterface.NetworkInterfaceId,
@@ -165,7 +165,7 @@ func (a *AWS) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 			}
 		}
 		if len(deleteIPs) == 0 {
-			return NonExistingIPError
+			return ErrNonExistingIP
 		}
 		inputV4 := ec2.UnassignPrivateIpAddressesInput{
 			NetworkInterfaceId: networkInterface.NetworkInterfaceId,
@@ -326,10 +326,10 @@ func (a *AWS) getCapacity(instanceV4Capacity, instanceV6Capacity int, networkInt
 
 func (a *AWS) getNetworkInterfaces(instance *ec2.Instance) ([]*ec2.InstanceNetworkInterface, error) {
 	if len(instance.NetworkInterfaces) == 0 {
-		return nil, NoNetworkInterfaceError
+		return nil, ErrNoNetworkInterface
 	}
 	if instance.NetworkInterfaces[0] == nil {
-		return nil, NoNetworkInterfaceError
+		return nil, ErrNoNetworkInterface
 	}
 	return instance.NetworkInterfaces, nil
 }
@@ -440,7 +440,7 @@ func sharedCredentialsFileFromDirectory(dir string) (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create file for shared credentials")
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Write(data); err != nil {
 		return "", errors.Wrapf(err, "failed to write credentials to %s", f.Name())
 	}

@@ -38,9 +38,9 @@ func (f *FakeCloudProvider) AssignPrivateIP(ip net.IP, node *corev1.Node) error 
 	f.StateTracker = append(f.StateTracker, fmt.Sprintf("assign-%v-%s", ip, node.Name))
 	if f.mockErrorOnAssign {
 		if f.mockErrorOnAssignWithExistingIPCondition {
-			return AlreadyExistingIPError
+			return ErrAlreadyExistingIP
 		}
-		return fmt.Errorf("Assign failed")
+		return fmt.Errorf("assign failed")
 	}
 	return f.waitForCompletion()
 }
@@ -48,14 +48,14 @@ func (f *FakeCloudProvider) AssignPrivateIP(ip net.IP, node *corev1.Node) error 
 func (f *FakeCloudProvider) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 	f.StateTracker = append(f.StateTracker, fmt.Sprintf("release-%v-%s", ip, node.Name))
 	if f.mockErrorOnRelease {
-		return fmt.Errorf("Release failed")
+		return fmt.Errorf("release failed")
 	}
 	return f.waitForCompletion()
 }
 
 func (f *FakeCloudProvider) waitForCompletion() error {
 	if f.mockErrorOnWait {
-		return fmt.Errorf("Waiting failed")
+		return fmt.Errorf("waiting failed")
 	}
 	if f.delayedCompletion.Nanoseconds() != 0 {
 		time.Sleep(f.delayedCompletion)
@@ -65,7 +65,7 @@ func (f *FakeCloudProvider) waitForCompletion() error {
 
 func (f *FakeCloudProvider) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[string]) ([]*NodeEgressIPConfiguration, error) {
 	if f.mockErrorOnGetNodeEgressIPConfiguration {
-		return nil, fmt.Errorf("Get node egress IP configuration failed")
+		return nil, fmt.Errorf("get node egress ip configuration failed")
 	}
 	return nil, nil
 }

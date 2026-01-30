@@ -100,10 +100,10 @@ func (g *GCP) AssignPrivateIP(ip net.IP, node *corev1.Node) error {
 	networkInterface := networkInterfaces[0]
 	for _, aliasIPRange := range networkInterface.AliasIpRanges {
 		if assignedIP := net.ParseIP(aliasIPRange.IpCidrRange); assignedIP.Equal(ip) {
-			return AlreadyExistingIPError
+			return ErrAlreadyExistingIP
 		}
 		if _, assignedSubnet, err := net.ParseCIDR(aliasIPRange.IpCidrRange); err == nil && assignedSubnet.Contains(ip) {
-			return AlreadyExistingIPError
+			return ErrAlreadyExistingIP
 		}
 	}
 	networkInterface.AliasIpRanges = append(networkInterface.AliasIpRanges, &google.AliasIpRange{
@@ -153,7 +153,7 @@ func (g *GCP) ReleasePrivateIP(ip net.IP, node *corev1.Node) error {
 		}
 	}
 	if !ipAssigned {
-		return NonExistingIPError
+		return ErrNonExistingIP
 	}
 	networkInterface.AliasIpRanges = keepAliases
 	// make sure that AliasIpRanges is always sent in the request, even if it is empty
@@ -280,10 +280,10 @@ func (g *GCP) getInstance(node *corev1.Node) (string, string, *google.Instance, 
 
 func (g *GCP) getNetworkInterfaces(instance *google.Instance) ([]*google.NetworkInterface, error) {
 	if len(instance.NetworkInterfaces) == 0 {
-		return nil, NoNetworkInterfaceError
+		return nil, ErrNoNetworkInterface
 	}
 	if instance.NetworkInterfaces[0] == nil {
-		return nil, NoNetworkInterfaceError
+		return nil, ErrNoNetworkInterface
 	}
 	return instance.NetworkInterfaces, nil
 }

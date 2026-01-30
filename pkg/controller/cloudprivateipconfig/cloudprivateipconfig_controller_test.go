@@ -57,14 +57,14 @@ type FakeCloudPrivateIPConfigController struct {
 }
 
 func (f *FakeCloudPrivateIPConfigController) initTestSetup(cloudPrivateIPConfig *cloudnetworkv1.CloudPrivateIPConfig) {
-	f.cloudPrivateIPConfigStore.Add(cloudPrivateIPConfig)
+	_ = f.cloudPrivateIPConfigStore.Add(cloudPrivateIPConfig)
 	f.initNodes()
 }
 
 func (f FakeCloudPrivateIPConfigController) initNodes() {
-	f.nodeStore.Add(&nodeA)
-	f.nodeStore.Add(&nodeB)
-	f.nodeStore.Add(&nodeC)
+	_ = f.nodeStore.Add(&nodeA)
+	_ = f.nodeStore.Add(&nodeB)
+	_ = f.nodeStore.Add(&nodeC)
 }
 
 type CloudPrivateIPConfigTestCase struct {
@@ -272,7 +272,7 @@ func TestSyncAddCloudPrivateIPConfig(t *testing.T) {
 			expectErrorOnAssignSync: true,
 		},
 		{
-			name: "Should be able to re-sync object on add with AlreadyExistingIPError",
+			name: "Should be able to re-sync object on add with ErrAlreadyExistingIP",
 			testObject: &cloudnetworkv1.CloudPrivateIPConfig{
 				ObjectMeta: v1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
@@ -329,7 +329,7 @@ func TestSyncAddCloudPrivateIPConfig(t *testing.T) {
 			mockCloudAssignErrorWithExistingIP: true,
 		},
 		{
-			name: "Should be able to re-sync object and add finalizer on add with AlreadyExistingIPError",
+			name: "Should be able to re-sync object and add finalizer on add with ErrAlreadyExistingIP",
 			testObject: &cloudnetworkv1.CloudPrivateIPConfig{
 				ObjectMeta: v1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
@@ -571,7 +571,7 @@ func TestSyncDeleteCloudPrivateIPConfig(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
 					// Fake a deletion by setting the time to anything
-					DeletionTimestamp: &v1.Time{time.Now()},
+					DeletionTimestamp: &v1.Time{Time: time.Now()},
 					Finalizers: []string{
 						cloudPrivateIPConfigFinalizer,
 					},
@@ -619,7 +619,7 @@ func TestSyncDeleteCloudPrivateIPConfig(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
 					// Fake a deletion by setting the time to anything
-					DeletionTimestamp: &v1.Time{time.Now()},
+					DeletionTimestamp: &v1.Time{Time: time.Now()},
 					Finalizers: []string{
 						cloudPrivateIPConfigFinalizer,
 					},
@@ -671,7 +671,7 @@ func TestSyncDeleteCloudPrivateIPConfig(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
 					// Fake a deletion by setting the time to anything
-					DeletionTimestamp: &v1.Time{time.Now()},
+					DeletionTimestamp: &v1.Time{Time: time.Now()},
 					Finalizers: []string{
 						cloudPrivateIPConfigFinalizer,
 					},
@@ -723,7 +723,7 @@ func TestSyncDeleteCloudPrivateIPConfig(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
 					// Fake a deletion by setting the time to anything
-					DeletionTimestamp: &v1.Time{time.Now()},
+					DeletionTimestamp: &v1.Time{Time: time.Now()},
 					Finalizers: []string{
 						cloudPrivateIPConfigFinalizer,
 					},
@@ -772,7 +772,7 @@ func TestSyncDeleteCloudPrivateIPConfig(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
 					// Fake a deletion by setting the time to anything
-					DeletionTimestamp: &v1.Time{time.Now()},
+					DeletionTimestamp: &v1.Time{Time: time.Now()},
 					Finalizers: []string{
 						cloudPrivateIPConfigFinalizer,
 					},
@@ -825,7 +825,7 @@ func TestSyncDeleteCloudPrivateIPConfig(t *testing.T) {
 				ObjectMeta: v1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
 					// Fake a deletion by setting the time to anything
-					DeletionTimestamp: &v1.Time{time.Now()},
+					DeletionTimestamp: &v1.Time{Time: time.Now()},
 					Finalizers: []string{
 						cloudPrivateIPConfigFinalizer,
 					},
@@ -1141,11 +1141,11 @@ func runTests(t *testing.T, tests []CloudPrivateIPConfigTestCase) {
 				t.Fatalf("NewFakeCloudPrivateIPConfigController expected no error, but got err: %v", err)
 			}
 			if test.isUpdate {
-				if err := controller.CloudNetworkConfigController.SyncHandler(test.testObject.Name); err != nil && !test.expectErrorOnReleaseSync {
+				if err := controller.SyncHandler(test.testObject.Name); err != nil && !test.expectErrorOnReleaseSync {
 					t.Fatalf("sync expected no error, but got err: %v", err)
 				}
 			}
-			if err := controller.CloudNetworkConfigController.SyncHandler(test.testObject.Name); err != nil && (!test.expectErrorOnAssignSync && !test.expectErrorOnReleaseSync) {
+			if err := controller.SyncHandler(test.testObject.Name); err != nil && (!test.expectErrorOnAssignSync && !test.expectErrorOnReleaseSync) {
 				t.Fatalf("sync expected no error, but got err: %v", err)
 			}
 			syncedObject, err := controller.cloudNetworkClient.CloudV1().CloudPrivateIPConfigs().Get(context.TODO(), test.testObject.Name, v1.GetOptions{})
