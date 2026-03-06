@@ -1,6 +1,12 @@
 package cloudprovider
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -47,5 +53,173 @@ func TestParseSubnet(t *testing.T) {
 	}
 	if err != nil {
 		t.Fatalf("did not expect err: %s", err)
+	}
+}
+
+func newTestGCP(t *testing.T) (*GCP, string) {
+	t.Helper()
+	dir := t.TempDir()
+	g := &GCP{
+		CloudProvider: CloudProvider{
+			cfg: CloudProviderConfig{CredentialDir: dir},
+			ctx: context.Background(),
+		},
+		nodeLockMap: make(map[string]*sync.Mutex),
+	}
+	return g, dir
+}
+
+func TestReadGCPCredentialsConfig_WIFPresent(t *testing.T) {
+	g, dir := newTestGCP(t)
+	wifData := `{"type":"external_account","audience":"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/pool/providers/provider"}`
+	if err := os.WriteFile(filepath.Join(dir, "workload_identity_config.json"), []byte(wifData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := g.readGCPCredentialsConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != wifData {
+		t.Fatalf("expected WIF config, got: %s", string(data))
+	}
+}
+
+func TestReadGCPCredentialsConfig_SAOnly(t *testing.T) {
+	g, dir := newTestGCP(t)
+	saData := `{"type":"service_account","project_id":"my-project"}`
+	if err := os.WriteFile(filepath.Join(dir, "service_account.json"), []byte(saData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := g.readGCPCredentialsConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != saData {
+		t.Fatalf("expected SA config, got: %s", string(data))
+	}
+}
+
+func TestReadGCPCredentialsConfig_EnvVarFallback(t *testing.T) {
+	g, _ := newTestGCP(t)
+	envData := `{"type":"external_account","audience":"test"}`
+	tmpFile := filepath.Join(t.TempDir(), "creds.json")
+	if err := os.WriteFile(tmpFile, []byte(envData), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", tmpFile)
+
+	data, err := g.readGCPCredentialsConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != envData {
+		t.Fatalf("expected env var config, got: %s", string(data))
+	}
+}
+
+func TestReadGCPCredentialsConfig_WIFTakesPriority(t *testing.T) {
+	g, dir := newTestGCP(t)
+	wifData := `{"type":"external_account","audience":"wif"}`
+	saData := `{"type":"service_account","project_id":"sa"}`
+	if err := os.WriteFile(filepath.Join(dir, "workload_identity_config.json"), []byte(wifData), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "service_account.json"), []byte(saData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := g.readGCPCredentialsConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != wifData {
+		t.Fatalf("expected WIF config to take priority, got: %s", string(data))
+	}
+}
+
+func TestReadGCPCredentialsConfig_NothingPresent(t *testing.T) {
+	g, _ := newTestGCP(t)
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+
+	_, err := g.readGCPCredentialsConfig()
+	if err == nil {
+		t.Fatal("expected error when no credentials are present")
+	}
+	if !strings.Contains(err.Error(), "no valid GCP credentials found") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestReadGCPCredentialsConfig_EnvVarFileMissing(t *testing.T) {
+	g, _ := newTestGCP(t)
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/path/creds.json")
+
+	_, err := g.readGCPCredentialsConfig()
+	if err == nil {
+		t.Fatal("expected error when GOOGLE_APPLICATION_CREDENTIALS file doesn't exist")
+	}
+	if !strings.Contains(err.Error(), "failed to read GOOGLE_APPLICATION_CREDENTIALS") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestEnsureUniverseDomain_Injected(t *testing.T) {
+	input := []byte(`{"type":"service_account","project_id":"test"}`)
+
+	result, err := ensureUniverseDomain(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal(result, &resultMap); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+	if resultMap["universe_domain"] != defaultUniverseDomain {
+		t.Fatalf("expected universe_domain %s, got %v", defaultUniverseDomain, resultMap["universe_domain"])
+	}
+}
+
+func TestEnsureUniverseDomain_Preserved(t *testing.T) {
+	customDomain := "custom.googleapis.com"
+	input := []byte(`{"type":"service_account","project_id":"test","universe_domain":"` + customDomain + `"}`)
+
+	result, err := ensureUniverseDomain(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resultMap map[string]interface{}
+	if err := json.Unmarshal(result, &resultMap); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+	if resultMap["universe_domain"] != customDomain {
+		t.Fatalf("expected universe_domain %s, got %v", customDomain, resultMap["universe_domain"])
+	}
+}
+
+func TestEnsureUniverseDomain_InvalidJSON(t *testing.T) {
+	input := []byte(`{not valid json`)
+
+	_, err := ensureUniverseDomain(input)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "cannot decode GCP credentials JSON") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestEnsureUniverseDomain_NullJSON(t *testing.T) {
+	input := []byte(`null`)
+
+	_, err := ensureUniverseDomain(input)
+	if err == nil {
+		t.Fatal("expected error for null JSON")
+	}
+	if !strings.Contains(err.Error(), "top-level JSON object is required") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }

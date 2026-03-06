@@ -91,6 +91,54 @@ metadata:
 type: Opaque
 ```
 
+### GCP Workload Identity Federation (WIF)
+
+In addition to service account key JSON files, the CNCC supports [GCP Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation) for keyless authentication. Credential detection is automatic — the controller checks for credentials in the following priority order:
+
+1. `workload_identity_config.json` in the credentials secret (WIF)
+2. `service_account.json` in the credentials secret (existing behavior)
+3. `GOOGLE_APPLICATION_CREDENTIALS` environment variable (for HyperShift HCP deployments)
+
+To use WIF, create a secret with a `workload_identity_config.json` key containing the external account credential configuration.
+
+The raw JSON file contents should look like this:
+
+```json
+{
+  "type": "external_account",
+  "audience": "//iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/my-pool/providers/my-provider",
+  "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+  "token_url": "https://sts.googleapis.com/v1/token",
+  "credential_source": {
+    "file": "/var/run/secrets/openshift/serviceaccount/token",
+    "format": {
+      "type": "text"
+    }
+  },
+  "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/my-sa@my-project.iam.gserviceaccount.com:generateAccessToken"
+}
+```
+
+Base64-encode the JSON and create the secret:
+
+```yaml
+apiVersion: v1
+data:
+  workload_identity_config.json: <base64-encoded JSON from above>
+kind: Secret
+metadata:
+  name: cloud-credentials
+  namespace: openshift-cloud-network-config-controller
+type: Opaque
+```
+
+**Migration:** No changes are required for existing deployments using `service_account.json`. The controller will continue to use service account credentials if `workload_identity_config.json` is not present.
+
+**Troubleshooting:** Check the controller logs for messages indicating which credential source is being used:
+- `"Using GCP Workload Identity Federation credentials from secret"` — WIF is active
+- `"Using GCP service account JSON credentials from secret"` — service account key is active
+- `"Using GOOGLE_APPLICATION_CREDENTIALS from environment"` — env var fallback is active
+
 ## AWS
 
 ### Secret
