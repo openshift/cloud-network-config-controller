@@ -95,7 +95,7 @@ func ensureUniverseDomain(credentialsJSON []byte) ([]byte, error) {
 // Priority:
 //  1. WIF config from secret
 //  2. service account JSON from secret (existing behavior)
-//  3. GOOGLE_APPLICATION_CREDENTIALS env var (for HCP)
+//  3. GOOGLE_APPLICATION_CREDENTIALS env var (for HCP deployments using WIF)
 func (g *GCP) readGCPCredentialsConfig() ([]byte, error) {
 	// Priority 1: WIF config from secret
 	wifConfig, err := g.readSecretData(wifCredentialsFile)
@@ -113,7 +113,7 @@ func (g *GCP) readGCPCredentialsConfig() ([]byte, error) {
 	}
 	klog.Infof("%s not found in secret: %v", serviceAccountFile, err)
 
-	// Priority 3: GOOGLE_APPLICATION_CREDENTIALS env var (for HCP deployments)
+	// Priority 3: GOOGLE_APPLICATION_CREDENTIALS env var (for HCP deployments using WIF)
 	if credFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); credFile != "" {
 		klog.Infof("Using GOOGLE_APPLICATION_CREDENTIALS from environment: %s", credFile)
 		data, err := os.ReadFile(credFile)
