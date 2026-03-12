@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 )
 
@@ -25,6 +27,9 @@ const (
 	// default universe domain
 	// https://github.com/openshift/cloud-network-config-controller/blob/dc255162b1442a1b85aa0b2ab37ed63245857476/vendor/golang.org/x/oauth2/google/default.go#L25
 	defaultUniverseDomain = "googleapis.com"
+
+	wifCredentialsFile = "workload_identity_config.json"
+	serviceAccountFile = "service_account.json"
 )
 
 // GCP implements the API wrapper for talking
@@ -37,34 +42,18 @@ type GCP struct {
 }
 
 func (g *GCP) initCredentials() (err error) {
-	secret, err := g.readSecretData("service_account.json")
+	credentialsJSON, err := g.readGCPCredentialsConfig()
 	if err != nil {
 		return err
 	}
-	secretData := []byte(secret)
 
-	// If the UniverseDomain is not set, the client will try to retrieve it from the metadata server.
-	// https://github.com/openshift/cloud-network-config-controller/blob/dc255162b1442a1b85aa0b2ab37ed63245857476/vendor/golang.org/x/oauth2/google/default.go#L77
-	// This won't work in OpenShift because the CNCC pod cannot access the metadata service IP address (we block
-	// the access to 169.254.169.254 from cluster-networked pods).
-	// Set the UniverseDomain to the default value explicitly.
-	if !strings.Contains(secret, "universe_domain") {
-		// Using option.WithUniverseDomain() doesn't work because the value is not passed to the client.
-		// Modify the credentials json directly instead
-		var jsonMap map[string]interface{}
-		err := json.Unmarshal(secretData, &jsonMap)
-		if err != nil {
-			return fmt.Errorf("error: cannot decode google client secret, err: %v", err)
-		}
-		jsonMap["universe_domain"] = defaultUniverseDomain
-		secretData, err = json.Marshal(&jsonMap)
-		if err != nil {
-			return fmt.Errorf("error: cannot encode google client secret, err: %v", err)
-		}
+	credentialsJSON, err = ensureUniverseDomain(credentialsJSON)
+	if err != nil {
+		return err
 	}
 
 	opts := []option.ClientOption{
-		option.WithCredentialsJSON(secretData),
+		option.WithCredentialsJSON(credentialsJSON),
 		option.WithUserAgent(UserAgent),
 	}
 	if g.cfg.APIOverride != "" {
@@ -73,9 +62,68 @@ func (g *GCP) initCredentials() (err error) {
 
 	g.client, err = google.NewService(g.ctx, opts...)
 	if err != nil {
-		return fmt.Errorf("error: cannot initialize google client, err: %v", err)
+		return fmt.Errorf("error: cannot initialize google client, err: %w", err)
 	}
 	return nil
+}
+
+// ensureUniverseDomain ensures the credentials JSON has a universe_domain field set.
+// If universe_domain is not set, the client will try to retrieve it from the metadata server.
+// This won't work in OpenShift because the CNCC pod cannot access 169.254.169.254.
+// Set it to the default value explicitly.
+func ensureUniverseDomain(credentialsJSON []byte) ([]byte, error) {
+	var jsonMap map[string]interface{}
+	if err := json.Unmarshal(credentialsJSON, &jsonMap); err != nil {
+		return nil, fmt.Errorf("cannot decode GCP credentials JSON: %w", err)
+	}
+	if jsonMap == nil {
+		return nil, fmt.Errorf("cannot decode GCP credentials JSON: top-level JSON object is required")
+	}
+	if _, has := jsonMap["universe_domain"]; !has {
+		klog.Infof("universe_domain not found in credentials, setting default: %s", defaultUniverseDomain)
+		jsonMap["universe_domain"] = defaultUniverseDomain
+		credentialsJSON, err := json.Marshal(&jsonMap)
+		if err != nil {
+			return nil, fmt.Errorf("cannot encode GCP credentials JSON: %w", err)
+		}
+		return credentialsJSON, nil
+	}
+	return credentialsJSON, nil
+}
+
+// readGCPCredentialsConfig reads GCP credentials from configured sources.
+// Priority:
+//  1. WIF config from secret
+//  2. service account JSON from secret (existing behavior)
+//  3. GOOGLE_APPLICATION_CREDENTIALS env var (for HCP deployments using WIF)
+func (g *GCP) readGCPCredentialsConfig() ([]byte, error) {
+	// Priority 1: WIF config from secret
+	wifConfig, err := g.readSecretData(wifCredentialsFile)
+	if err == nil {
+		klog.Infof("Using GCP Workload Identity Federation credentials from secret")
+		return []byte(wifConfig), nil
+	}
+	klog.Infof("%s not found in secret: %v, trying service account", wifCredentialsFile, err)
+
+	// Priority 2: Service account JSON from secret (existing behavior)
+	saConfig, err := g.readSecretData(serviceAccountFile)
+	if err == nil {
+		klog.Infof("Using GCP service account JSON credentials from secret")
+		return []byte(saConfig), nil
+	}
+	klog.Infof("%s not found in secret: %v", serviceAccountFile, err)
+
+	// Priority 3: GOOGLE_APPLICATION_CREDENTIALS env var (for HCP deployments using WIF)
+	if credFile := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); credFile != "" {
+		klog.Infof("Using GOOGLE_APPLICATION_CREDENTIALS from environment: %s", credFile)
+		data, err := os.ReadFile(credFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read GOOGLE_APPLICATION_CREDENTIALS file %s: %w", credFile, err)
+		}
+		return data, nil
+	}
+
+	return nil, fmt.Errorf("no valid GCP credentials found (tried: %s, %s in %s, GOOGLE_APPLICATION_CREDENTIALS env)", wifCredentialsFile, serviceAccountFile, g.cfg.CredentialDir)
 }
 
 // AssignPrivateIP adds the IP to the associated instance's IP aliases.
