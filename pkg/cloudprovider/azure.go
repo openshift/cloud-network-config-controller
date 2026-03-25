@@ -150,6 +150,9 @@ func (a *Azure) initCredentials() error {
 	options := &arm.ClientOptions{
 		ClientOptions: policy.ClientOptions{
 			Cloud: cloudConfig,
+			Telemetry: policy.TelemetryOptions{
+				ApplicationID: UserAgent,
+			},
 		},
 	}
 
@@ -593,6 +596,9 @@ func (a *Azure) getAzureCredentials(env azureapi.Environment, cfg *azureCredenti
 		klog.Infof("Using user assigned identity credentials authentication")
 		clientOptions := azcore.ClientOptions{
 			Cloud: cloudConfig,
+			Telemetry: policy.TelemetryOptions{
+				ApplicationID: UserAgent,
+			},
 		}
 		cred, err = dataplane.NewUserAssignedIdentityCredential(context.Background(), userAssignedIdentityCredentialsFilePath, dataplane.WithClientOpts(clientOptions))
 		if err != nil {
@@ -607,6 +613,9 @@ func (a *Azure) getAzureCredentials(env azureapi.Environment, cfg *azureCredenti
 			options := azidentity.WorkloadIdentityCredentialOptions{
 				ClientOptions: azcore.ClientOptions{
 					Cloud: cloudConfig,
+					Telemetry: policy.TelemetryOptions{
+						ApplicationID: UserAgent,
+					},
 				},
 				ClientID:      cfg.clientID,
 				TenantID:      cfg.tenantID,
@@ -625,6 +634,9 @@ func (a *Azure) getAzureCredentials(env azureapi.Environment, cfg *azureCredenti
 		options := azidentity.ClientSecretCredentialOptions{
 			ClientOptions: azcore.ClientOptions{
 				Cloud: cloudConfig,
+				Telemetry: policy.TelemetryOptions{
+					ApplicationID: UserAgent,
+				},
 			},
 		}
 		cred, err = azidentity.NewClientSecretCredential(cfg.tenantID, cfg.clientID, cfg.clientSecret, &options)
