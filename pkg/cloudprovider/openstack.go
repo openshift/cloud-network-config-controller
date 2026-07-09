@@ -51,7 +51,7 @@ const (
 	// to the default value of 10, always; and we might want to document that OSP environments must set
 	// max_allowed_address_pairs >= 10. For more details, see:
 	// https://github.com/openstack/neutron/blob/800f863ccc502b334cb2dd79ec54066440e43e27/neutron/conf/extensions/allowedaddresspairs.py#L21
-	openstackMaxCapacity = 10
+	defaultOpenStackMaxCapacity = 10
 )
 
 // OpenStack implements the API wrapper for talking
@@ -549,8 +549,9 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets
 // The interface is keyed by a neutron UUID.
 // If multiple IPv4 repectively multiple IPv6 subnets are attached to the same port, throw an error.
 // The IP capacity is per port. The definition of this field does unfortunately not play very well with the way how
-// neutron operates as there is no such thing as a per port quota or limit. Therefore we set a ceiling of
-// `openstackMaxCapacity`. The number of unique IP addresses in allowed_address_pair and fixed_ips is subtracted from
+// neutron operates as there is no such thing as a per port quota or limit. However, a quota can be set to mirror
+// the max_allowed_address_pairs configuration in neutron.conf, and when unset, it will default to
+// `defaultOpenStackMaxCapacity`. The number of unique IP addresses in allowed_address_pair and fixed_ips is subtracted from
 // that ceiling.
 func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port, cpicIPs sets.Set[string]) (*NodeEgressIPConfiguration, error) {
 	var ipv4, ipv6 string
@@ -597,7 +598,19 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port,
 		}
 	}
 
+	var openstackMaxCapacity int
+
+	if o.cfg.OpenStackMaxAllowedAddressPairs > 0 {
+		openstackMaxCapacity = o.cfg.OpenStackMaxAllowedAddressPairs
+	} else {
+		openstackMaxCapacity = defaultOpenStackMaxCapacity
+	}
+
 	c := openstackMaxCapacity + cloudPrivateIPsCount - len(p.AllowedAddressPairs)
+	if c < 0 {
+		return nil, fmt.Errorf("max allowed address pairs %d is too small for port %s which already has %d allowed address pairs and %d managed by CNCC",
+			openstackMaxCapacity, p.ID, len(p.AllowedAddressPairs), cloudPrivateIPsCount)
+	}
 	return &NodeEgressIPConfiguration{
 		Interface: p.ID,
 		IFAddr: ifAddr{

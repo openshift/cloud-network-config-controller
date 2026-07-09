@@ -685,7 +685,7 @@ func TestOpenStackPlugin(t *testing.T) {
 				IPv6: "2000::/64",
 			},
 			Capacity: capacity{
-				IP: ptr.To(openstackMaxCapacity),
+				IP: ptr.To(defaultOpenstackMaxCapacity),
 			},
 		},
 	}
@@ -812,7 +812,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2000::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenstackMaxCapacity),
 						},
 					},
 				},
@@ -848,7 +848,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2001::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenstackMaxCapacity),
 						},
 					},
 				},
@@ -892,7 +892,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2000::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenstackMaxCapacity),
 						},
 					},
 				},
@@ -939,7 +939,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2000::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenstackMaxCapacity),
 						},
 					},
 				},
@@ -951,7 +951,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2001::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenstackMaxCapacity),
 						},
 					},
 				},
@@ -1036,7 +1036,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IP: ptr.To(openstackMaxCapacity - 5), // 5 allowed_address_pairs configured on the port.
+					IP: ptr.To(defaultOpenstackMaxCapacity - 5), // 5 allowed_address_pairs configured on the port.
 				},
 			},
 		},
@@ -1049,7 +1049,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IP: ptr.To(openstackMaxCapacity - 2), // excluding 2 allowed_address_pairs configured on the port.
+					IP: ptr.To(defaultOpenstackMaxCapacity - 2), // excluding 2 allowed_address_pairs configured on the port.
 				},
 			},
 			// Configure IPs with 3 ips are within neutron subnet, 1 ip outside neutron subnet.
