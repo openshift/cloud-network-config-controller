@@ -33,8 +33,8 @@ type FakeRacyCloudPrivateIPConfigController struct {
 
 func NewFakeRacyCloudPrivateIPConfigController(delayCompletion time.Duration) *FakeRacyCloudPrivateIPConfigController {
 
-	fakeCloudNetworkClient := fakecloudnetworkclientset.NewSimpleClientset()
-	fakeKubeClient := fakekubeclient.NewSimpleClientset([]runtime.Object{&nodeA, &nodeB, &nodeC}...)
+	fakeCloudNetworkClient := fakecloudnetworkclientset.NewClientset()
+	fakeKubeClient := fakekubeclient.NewClientset([]runtime.Object{&nodeA, &nodeB, &nodeC}...)
 	fakeCloudProvider := cloudprovider.NewFakeCloudProvider(false, false, false, false, delayCompletion)
 
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(fakeKubeClient, 0)

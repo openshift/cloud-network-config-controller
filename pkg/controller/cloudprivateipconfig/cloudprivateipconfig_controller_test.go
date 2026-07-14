@@ -84,7 +84,7 @@ type CloudPrivateIPConfigTestCase struct {
 
 func (t *CloudPrivateIPConfigTestCase) NewFakeCloudPrivateIPConfigController() (*FakeCloudPrivateIPConfigController, error) {
 
-	fakeCloudNetworkClient := fakecloudnetworkclientset.NewSimpleClientset([]runtime.Object{t.testObject}...)
+	fakeCloudNetworkClient := fakecloudnetworkclientset.NewClientset([]runtime.Object{t.testObject}...)
 	fakeKubeClient := fakekubeclient.NewClientset()
 	fakeCloudProvider := cloudprovider.NewFakeCloudProvider(t.mockCloudAssignError, t.mockCloudAssignErrorWithExistingIP, t.mockCloudReleaseError, t.mockCloudWaitError, t.delayedCompletion)
 
