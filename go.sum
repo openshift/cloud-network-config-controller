@@ -194,6 +194,8 @@ github.com/jmespath/go-jmespath/internal/testify v1.5.1 h1:shLQSRRSCCPj3f2gpwzGw
 github.com/jmespath/go-jmespath/internal/testify v1.5.1/go.mod h1:L3OGu8Wl2/fWfCI6z80xFu9LTZmf1ZRjMHUOPmWr69U=
 github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnrnM=
 github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHmT4TnhNGBo=
+github.com/jubittajohn/library-go v0.0.0-20260703134644-86dc2b674af6 h1:mWiODNREklB95WEYt3KVaY6Tsq4Hm/wVmUQjmfh27Mk=
+github.com/jubittajohn/library-go v0.0.0-20260703134644-86dc2b674af6/go.mod h1:5Oe/cYiG/iF+xdETBvb01Ox2IZlP8i1P3iwetO5Abtc=
 github.com/keybase/go-keychain v0.0.0-20231219164618-57a3676c3af6 h1:IsMZxCuZqKuao2vNdfD82fjjgPLfyHLpR41Z88viRWs=
 github.com/keybase/go-keychain v0.0.0-20231219164618-57a3676c3af6/go.mod h1:3VeWNIJaW+O5xpRQbPp0Ybqu1vJd/pm7s2F473HRrkw=
 github.com/klauspost/compress v1.18.0 h1:c/Cqfb0r+Yi+JtIEq73FWXVkRonBlf0CRNYc8Zttxdo=
@@ -231,8 +233,6 @@ github.com/openshift/api v0.0.0-20260713141437-2dd36ba36332 h1:qQC1vBfduxkMNZw9Q
 github.com/openshift/api v0.0.0-20260713141437-2dd36ba36332/go.mod h1:7WJ3IPaK6nmWT8bDcaNooHqd0H5WepjVqV/10VlkMEM=
 github.com/openshift/client-go v0.0.0-20260703082747-24d059aea27a h1:RfmstmmWz5/23/Tt8gBipICzC1VHQLgGBeQUQ1aWoUA=
 github.com/openshift/client-go v0.0.0-20260703082747-24d059aea27a/go.mod h1:fNuXvm6bMJff2AxiRb9CR5L3a9CLzVgcoSmHZ3l7FgU=
-github.com/openshift/library-go v0.0.0-20260713143403-795ac1a480b5 h1:85yhDVpru8taEfEzDapuOb4nHWhLuik6/Qz1Kkn2nvg=
-github.com/openshift/library-go v0.0.0-20260713143403-795ac1a480b5/go.mod h1:8d0qQEDq2kpIZmaE1tKpvZ4pLeQZT+mW2JpqAh3iZIc=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c h1:+mdjkGKdHQG3305AYmdv1U2eRNDiU2ErMBj1gwrq8eQ=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c/go.mod h1:7rwL4CYBLnjLxUqIJNnCWiEdr3bn6IUYi15bNlnbCCU=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
