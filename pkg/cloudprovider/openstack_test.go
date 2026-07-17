@@ -1158,8 +1158,8 @@ func TestAllowUnAllowIPAddressOnNeutronPort(t *testing.T) {
 		if tc.errString != "" {
 			t.Fatalf("TestAllowUnAllowIPAddressOnNeutronPort(%d): Received no error but expected to see '%s'", i, tc.errString)
 		}
-		wantSet := sets.NewString(tc.allowedIPs...)
-		haveSet := sets.NewString()
+		wantSet := sets.New[string](tc.allowedIPs...)
+		haveSet := sets.New[string]()
 		if p, ok := portMap[tc.portID]; ok {
 			for _, aip := range p.AllowedAddressPairs {
 				haveSet.Insert(aip.IPAddress)
@@ -1390,8 +1390,8 @@ func TestGetNeutronSubnetsForNetwork(t *testing.T) {
 			continue
 		}
 
-		expectedSet := sets.NewString(tc.subnetIDs...)
-		listedSet := sets.NewString()
+		expectedSet := sets.New[string](tc.subnetIDs...)
+		listedSet := sets.New[string]()
 		for _, s := range listedSubnets {
 			listedSet.Insert(s.ID)
 		}
@@ -1509,8 +1509,8 @@ func TestListNovaServerPorts(t *testing.T) {
 			continue
 		}
 
-		expectedSet := sets.NewString(tc.portIDs...)
-		listedSet := sets.NewString()
+		expectedSet := sets.New[string](tc.portIDs...)
+		listedSet := sets.New[string]()
 		for _, p := range listedPorts {
 			listedSet.Insert(p.ID)
 		}

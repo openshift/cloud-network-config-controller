@@ -251,9 +251,9 @@ func (a *AWS) waitForCompletion(node *corev1.Node, ips []string, deleteOp bool) 
 			}
 		}
 		if deleteOp {
-			return !sets.NewString(assignedIPs...).HasAny(ips...), nil
+			return !sets.New[string](assignedIPs...).HasAny(ips...), nil
 		} else {
-			return sets.NewString(assignedIPs...).HasAll(ips...), nil
+			return sets.New[string](assignedIPs...).HasAll(ips...), nil
 		}
 	})
 }
