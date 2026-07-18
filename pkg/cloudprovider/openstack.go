@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -40,18 +41,10 @@ const (
 	openstackProviderPrefix = "openstack:///"
 	egressIPTag             = "OpenShiftEgressIP"
 
-	// NOTE: Capacity is defined on a per interface basis as:
-	// - IP address capacity for each node, where the capacity is either IP family
-	//   agnostic or not.
-	// However, in OpenStack, we do have several possible ceilings such as port quotas and max_allowed_address_pairs.
-	// PortQuotas is the quota for the entire project and it might change based on admin settings. On the other hand,
-	// the PortQuota value should always be high enough and we should most likely not bother looking it up.
-	// However, max_allowed_address_pairs defaults to 10. It is only configurable in neutron.conf and there is no way
-	// to retrieve it through the API. In RHOSP, it defaults to 10, as well. Therefore, our best option is to set this
-	// to the default value of 10, always; and we might want to document that OSP environments must set
-	// max_allowed_address_pairs >= 10. For more details, see:
+	// Default for Neutron's max_allowed_address_pairs, configurable via the
+	// "max-allowed-address-pairs" key in the kube-cloud-config ConfigMap.
 	// https://github.com/openstack/neutron/blob/800f863ccc502b334cb2dd79ec54066440e43e27/neutron/conf/extensions/allowedaddresspairs.py#L21
-	openstackMaxCapacity = 10
+	openstackDefaultMaxCapacity = 10
 )
 
 // OpenStack implements the API wrapper for talking
@@ -545,6 +538,24 @@ func (o *OpenStack) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets
 	return nil, fmt.Errorf("no suitable interface configurations found")
 }
 
+// getMaxCapacity reads the "max-allowed-address-pairs" key from the
+// kube-cloud-config ConfigMap mounted at cfg.ConfigDir. If the key is
+// absent, unreadable, or not a valid positive integer, it returns the
+// default of openstackDefaultMaxCapacity (10).
+func (o *OpenStack) getMaxCapacity() int {
+	data, err := os.ReadFile(filepath.Join(o.cfg.ConfigDir, "max-allowed-address-pairs"))
+	if err != nil {
+		return openstackDefaultMaxCapacity
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || v <= 0 {
+		klog.Warningf("Ignoring invalid max-allowed-address-pairs value %q, using default %d", string(data), openstackDefaultMaxCapacity)
+		return openstackDefaultMaxCapacity
+	}
+	klog.Infof("Using configured max-allowed-address-pairs: %d", v)
+	return v
+}
+
 // getNeutronPortNodeEgressIPConfiguration renders the NeutronPortNodeEgressIPConfiguration for a given port.
 // The interface is keyed by a neutron UUID.
 // If multiple IPv4 repectively multiple IPv6 subnets are attached to the same port, throw an error.
@@ -597,7 +608,7 @@ func (o *OpenStack) getNeutronPortNodeEgressIPConfiguration(p neutronports.Port,
 		}
 	}
 
-	c := openstackMaxCapacity + cloudPrivateIPsCount - len(p.AllowedAddressPairs)
+	c := o.getMaxCapacity() + cloudPrivateIPsCount - len(p.AllowedAddressPairs)
 	return &NodeEgressIPConfiguration{
 		Interface: p.ID,
 		IFAddr: ifAddr{
