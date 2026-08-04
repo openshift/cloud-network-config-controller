@@ -287,6 +287,12 @@ func (a *AWS) getSubnet(networkInterface *ec2.InstanceNetworkInterface) (*net.IP
 	// one subnet, specially given that you can only have one IPv4 CIDR block
 	// defined...¯\_(ツ)_/¯
 	// Let's just pick the first.
+	if len(subnet.Ipv6CidrBlockAssociationSet) > 0 {
+		klog.Infof("getSubnet: subnet %s first IPv6 CIDR association: cidr=%s state=%s",
+			awsapi.StringValue(networkInterface.SubnetId),
+			awsapi.StringValue(subnet.Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock),
+			awsapi.StringValue(subnet.Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlockState.State))
+	}
 	if len(subnet.Ipv6CidrBlockAssociationSet) > 0 && subnet.Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock != nil && *subnet.Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock != "" {
 		_, subnet, err := net.ParseCIDR(*subnet.Ipv6CidrBlockAssociationSet[0].Ipv6CidrBlock)
 		if err != nil {
