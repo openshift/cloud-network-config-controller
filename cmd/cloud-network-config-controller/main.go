@@ -264,6 +264,7 @@ func init() {
 	flag.StringVar(&platformCfg.AzureEnvironment, "platform-azure-environment", "AzurePublicCloud", "The Azure environment name, used to select API endpoints")
 	flag.StringVar(&platformCfg.AWSCAOverride, "platform-aws-ca-override", "", "Path to a separate CA bundle to use when connecting to the AWS API")
 	flag.StringVar(&kubeConfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
+	flag.IntVar(&platformCfg.OpenStackMaxAllowedAddressPairs, "platform-os-max-allowed-address-pairs", 0, "Maximum number of allowed address pairs per OpenStack port. Overrides the Neutron default of 10.")
 	flag.Parse()
 
 	// Verify required arguments

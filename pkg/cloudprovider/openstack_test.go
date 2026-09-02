@@ -685,7 +685,7 @@ func TestOpenStackPlugin(t *testing.T) {
 				IPv6: "2000::/64",
 			},
 			Capacity: capacity{
-				IP: ptr.To(openstackMaxCapacity),
+				IP: ptr.To(defaultOpenStackMaxCapacity),
 			},
 		},
 	}
@@ -812,7 +812,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2000::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenStackMaxCapacity),
 						},
 					},
 				},
@@ -848,7 +848,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2001::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenStackMaxCapacity),
 						},
 					},
 				},
@@ -892,7 +892,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2000::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenStackMaxCapacity),
 						},
 					},
 				},
@@ -939,7 +939,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2000::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenStackMaxCapacity),
 						},
 					},
 				},
@@ -951,7 +951,7 @@ func TestGetNodeEgressIPConfiguration(t *testing.T) {
 							IPv6: "2001::/64",
 						},
 						Capacity: capacity{
-							IP: ptr.To(openstackMaxCapacity),
+							IP: ptr.To(defaultOpenStackMaxCapacity),
 						},
 					},
 				},
@@ -1036,7 +1036,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IP: ptr.To(openstackMaxCapacity - 5), // 5 allowed_address_pairs configured on the port.
+					IP: ptr.To(defaultOpenStackMaxCapacity - 5), // 5 allowed_address_pairs configured on the port.
 				},
 			},
 		},
@@ -1049,7 +1049,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 					IPv6: "2000::/64",
 				},
 				Capacity: capacity{
-					IP: ptr.To(openstackMaxCapacity - 2), // excluding 2 allowed_address_pairs configured on the port.
+					IP: ptr.To(defaultOpenStackMaxCapacity - 2), // excluding 2 allowed_address_pairs configured on the port.
 				},
 			},
 			// Configure IPs with 3 ips are within neutron subnet, 1 ip outside neutron subnet.
@@ -1066,7 +1066,7 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 	}
 
 	for i, tc := range tcs {
-		cpicIPs := sets.New[string](tc.cloudPrivateIPConfigs...)
+		cpicIPs := sets.New(tc.cloudPrivateIPConfigs...)
 		nodeEgressIPConfig, err := o.getNeutronPortNodeEgressIPConfiguration(tc.port, cpicIPs)
 		if err != nil {
 			if !strings.Contains(err.Error(), tc.errString) {
@@ -1078,6 +1078,122 @@ func TestGetNeutronPortNodeEgressIPConfiguration(t *testing.T) {
 			t.Fatalf("TestGetNeutronPortNodeEgressIPConfiguration(%d): Received unexpected nodeEgressIPConfig. Expected: %v, got %v",
 				i, tc.nodeEgressIPConfig, nodeEgressIPConfig)
 		}
+	}
+}
+
+// TestGetNeutronPortNodeEgressIPConfigurationMaxAllowedAddressPairs tests that the
+// OpenStackMaxAllowedAddressPairs config field correctly overrides the default OpenStack allowed address
+// pairs capacity when computing node egress IP configuration.
+func TestGetNeutronPortNodeEgressIPConfigurationMaxAllowedAddressPairs(t *testing.T) {
+	th.SetupHTTP()
+	defer th.TeardownHTTP()
+	HandleSubnetList(t)
+	HandlePortListAndCreation(t)
+
+	tcs := []struct {
+		name                  string
+		maxAllowedAddrPairs   int
+		port                  neutronports.Port
+		nodeEgressIPConfig    NodeEgressIPConfiguration
+		cloudPrivateIPConfigs []string
+		errString             string
+	}{
+		{
+			name:                "custom positive value overrides default",
+			maxAllowedAddrPairs: 20,
+			port:                portMap["9ab428d4-58f8-42d7-9672-90c3f5641f83"],
+			nodeEgressIPConfig: NodeEgressIPConfiguration{
+				Interface: "9ab428d4-58f8-42d7-9672-90c3f5641f83",
+				IFAddr: ifAddr{
+					IPv4: "192.0.2.0/24",
+					IPv6: "2000::/64",
+				},
+				Capacity: capacity{
+					IP: ptr.To(20 - 5), // 5 allowed_address_pairs on the port
+				},
+			},
+		},
+		{
+			name:                "custom positive value with non-empty cloudPrivateIPConfigs",
+			maxAllowedAddrPairs: 20,
+			port:                portMap["9ab428d4-58f8-42d7-9672-90c3f5641f83"],
+			nodeEgressIPConfig: NodeEgressIPConfiguration{
+				Interface: "9ab428d4-58f8-42d7-9672-90c3f5641f83",
+				IFAddr: ifAddr{
+					IPv4: "192.0.2.0/24",
+					IPv6: "2000::/64",
+				},
+				Capacity: capacity{
+					IP: ptr.To(20 + 3 - 5), // override=20, 3 of 5 allowed_address_pairs managed by CNCC
+				},
+			},
+			// 3 IPs within neutron subnet (managed by CNCC), 1 outside.
+			cloudPrivateIPConfigs: []string{"192.0.2.10", "2000::1", "2000::2", "10.10.10.1"},
+		},
+		{
+			name:                "max too small for existing address pairs",
+			maxAllowedAddrPairs: 3,
+			port:                portMap["9ab428d4-58f8-42d7-9672-90c3f5641f83"],
+			errString:           "max allowed address pairs 3 is too small for port 9ab428d4-58f8-42d7-9672-90c3f5641f83 which already has 5 allowed address pairs and 0 managed by CNCC",
+		},
+		{
+			name:                "unset flag uses default capacity",
+			maxAllowedAddrPairs: 0,
+			port:                portMap["9ab428d4-58f8-42d7-9672-90c3f5641f83"],
+			nodeEgressIPConfig: NodeEgressIPConfiguration{
+				Interface: "9ab428d4-58f8-42d7-9672-90c3f5641f83",
+				IFAddr: ifAddr{
+					IPv4: "192.0.2.0/24",
+					IPv6: "2000::/64",
+				},
+				Capacity: capacity{
+					IP: ptr.To(defaultOpenStackMaxCapacity - 5),
+				},
+			},
+		},
+		{
+			name:                "negative flag value uses default capacity",
+			maxAllowedAddrPairs: -5,
+			port:                portMap["9ab428d4-58f8-42d7-9672-90c3f5641f83"],
+			nodeEgressIPConfig: NodeEgressIPConfiguration{
+				Interface: "9ab428d4-58f8-42d7-9672-90c3f5641f83",
+				IFAddr: ifAddr{
+					IPv4: "192.0.2.0/24",
+					IPv6: "2000::/64",
+				},
+				Capacity: capacity{
+					IP: ptr.To(defaultOpenStackMaxCapacity - 5),
+				},
+			},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			o := OpenStack{
+				CloudProvider: CloudProvider{
+					cfg: CloudProviderConfig{
+						OpenStackMaxAllowedAddressPairs: tc.maxAllowedAddrPairs,
+					},
+				},
+				novaClient:    testclient.ServiceClient(),
+				neutronClient: testclient.ServiceClient(),
+			}
+			cpicIPs := sets.New(tc.cloudPrivateIPConfigs...)
+			nodeEgressIPConfig, err := o.getNeutronPortNodeEgressIPConfiguration(tc.port, cpicIPs)
+			if err != nil {
+				if tc.errString == "" || !strings.Contains(err.Error(), tc.errString) {
+					t.Fatalf("Received unexpected error, err: %q, expected to contain: %q", err, tc.errString)
+				}
+				return
+			}
+			if tc.errString != "" {
+				t.Fatalf("Expected error containing %q but got none", tc.errString)
+			}
+			if !reflect.DeepEqual(*nodeEgressIPConfig, tc.nodeEgressIPConfig) {
+				t.Fatalf("Received unexpected nodeEgressIPConfig.\nExpected: %v\nGot:      %v", tc.nodeEgressIPConfig, nodeEgressIPConfig)
+			}
+		})
 	}
 }
 
