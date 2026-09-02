@@ -42,6 +42,10 @@ const (
 	defaultAzurePrivateIPCapacity = 256
 	// defaultAzureOperationTimeout is the timeout for all Azure operations
 	defaultAzureOperationTimeout = 10 * time.Second
+	// defaultAzurePollingTimeout is the timeout for polling Azure NIC update
+	// operations to completion. Azure NIC updates involve multiple API
+	// roundtrips and can take significantly longer than the initial request.
+	defaultAzurePollingTimeout = 2 * time.Minute
 )
 
 // Azure implements the API wrapper for talking
@@ -392,11 +396,20 @@ func (a *Azure) createOrUpdate(networkInterface armnetwork.Interface) (*runtime.
 }
 
 func (a *Azure) waitForCompletion(poller *runtime.Poller[armnetwork.InterfacesClientCreateOrUpdateResponse]) error {
-	// No specified timeout for this operation, because a valid value doesn't
-	// seem possible to estimate. Note: Azure has some defaults defined here:
+	// Previously, no timeout was specified for this operation because a valid
+	// value didn't seem possible to estimate. Note: Azure has some defaults
+	// defined here:
 	// https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime@v1.17.0#Poller.PollUntilDone
-	if _, err := poller.PollUntilDone(context.TODO(), nil); err != nil {
-		return err
+	//
+	// Cap the polling to defaultAzurePollingTimeout (2 min). Each NIC update
+	// involves 7-8 Azure API roundtrips; 2 min allows ~4 poll cycles at the
+	// SDK's default 30s interval, which is generous for a single IP add/remove.
+	// If the operation hasn't completed by then, return an error so the
+	// controller can retry and the per-node mutex is released.
+	ctx, cancel := context.WithTimeout(context.Background(), defaultAzurePollingTimeout)
+	defer cancel()
+	if _, err := poller.PollUntilDone(ctx, nil); err != nil {
+		return fmt.Errorf("timed out or failed waiting for Azure NIC update to complete: %w", err)
 	}
 	return nil
 }
