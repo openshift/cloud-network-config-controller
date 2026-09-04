@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	goauth "golang.org/x/oauth2/google"
 	google "google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	corev1 "k8s.io/api/core/v1"
@@ -52,8 +53,27 @@ func (g *GCP) initCredentials() (err error) {
 		return err
 	}
 
+	// Parse the credential type to allow restricting which credential types are
+	// accepted from external sources. In this case, there are no restrictions
+	// so we simply pass the type through.
+	var f struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(credentialsJSON, &f); err != nil {
+		return fmt.Errorf("error: cannot parse credentials JSON type: %w", err)
+	}
+
+	creds, err := goauth.CredentialsFromJSONWithType(g.ctx, credentialsJSON, goauth.CredentialsType(f.Type), google.CloudPlatformScope)
+	if err != nil {
+		return fmt.Errorf("error: cannot parse credentials JSON: %w", err)
+	}
+	ud, err := creds.GetUniverseDomain()
+	if err != nil {
+		return fmt.Errorf("error: cannot get universe domain from credentials: %w", err)
+	}
 	opts := []option.ClientOption{
-		option.WithCredentialsJSON(credentialsJSON),
+		option.WithAuthCredentialsJSON(option.CredentialsType(f.Type), credentialsJSON),
+		option.WithUniverseDomain(ud),
 		option.WithUserAgent(UserAgent),
 	}
 	if g.cfg.APIOverride != "" {
