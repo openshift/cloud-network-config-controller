@@ -10,8 +10,6 @@ import (
 	"sync"
 
 	configv1 "github.com/openshift/api/config/v1"
-	apifeatures "github.com/openshift/api/features"
-	"github.com/openshift/library-go/pkg/operator/configobserver/featuregates"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -135,8 +133,7 @@ func (n *NodeEgressIPConfiguration) String() string {
 }
 
 func NewCloudProviderClient(cfg CloudProviderConfig,
-	platformStatus *configv1.PlatformStatus,
-	featureGates featuregates.FeatureGate) (CloudProviderIntf, error) {
+	platformStatus *configv1.PlatformStatus) (CloudProviderIntf, error) {
 	var cloudProviderIntf CloudProviderIntf
 
 	// Initialize a separate context from the main context, rationale: cloud
@@ -159,10 +156,9 @@ func NewCloudProviderClient(cfg CloudProviderConfig,
 		}
 
 		cloudProviderIntf = &Azure{
-			CloudProvider:                cp,
-			platformStatus:               azurePlatformStatus,
-			nodeLockMap:                  make(map[string]*sync.Mutex),
-			azureWorkloadIdentityEnabled: featureGates.Enabled(apifeatures.FeatureGateAzureWorkloadIdentity),
+			CloudProvider:  cp,
+			platformStatus: azurePlatformStatus,
+			nodeLockMap:    make(map[string]*sync.Mutex),
 		}
 	case PlatformTypeAWS:
 		cloudProviderIntf = &AWS{

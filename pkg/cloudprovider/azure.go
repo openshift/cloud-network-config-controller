@@ -48,15 +48,14 @@ const (
 // to the Azure cloud API
 type Azure struct {
 	CloudProvider
-	platformStatus               *configv1.AzurePlatformStatus
-	resourceGroup                string
-	env                          azureapi.Environment
-	vmClient                     *armcompute.VirtualMachinesClient
-	virtualNetworkClient         *armnetwork.VirtualNetworksClient
-	networkClient                *armnetwork.InterfacesClient
-	nodeMapLock                  sync.Mutex
-	nodeLockMap                  map[string]*sync.Mutex
-	azureWorkloadIdentityEnabled bool
+	platformStatus       *configv1.AzurePlatformStatus
+	resourceGroup        string
+	env                  azureapi.Environment
+	vmClient             *armcompute.VirtualMachinesClient
+	virtualNetworkClient *armnetwork.VirtualNetworksClient
+	networkClient        *armnetwork.InterfacesClient
+	nodeMapLock          sync.Mutex
+	nodeLockMap          map[string]*sync.Mutex
 }
 
 type azureCredentialsConfig struct {
@@ -605,7 +604,7 @@ func (a *Azure) getAzureCredentials(env azureapi.Environment, cfg *azureCredenti
 			return nil, cloud.Configuration{}, err
 		}
 	} else if strings.TrimSpace(cfg.clientSecret) == "" {
-		if a.azureWorkloadIdentityEnabled && strings.TrimSpace(cfg.tokenFile) != "" {
+		if strings.TrimSpace(cfg.tokenFile) != "" {
 			klog.Infof("Using workload identity authentication")
 			if cfg.clientID == "" || cfg.tenantID == "" {
 				return nil, cloud.Configuration{}, fmt.Errorf("clientID and tenantID are required in workload identity authentication")
