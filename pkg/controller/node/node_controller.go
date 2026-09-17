@@ -78,11 +78,20 @@ func NewNodeController(
 	_, err := nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.Enqueue,
 		UpdateFunc: func(oldN, newN interface{}) {
+			oldNode, _ := oldN.(*corev1.Node)
+			newNode, _ := newN.(*corev1.Node)
+			// Enqueue on informer resync (same ResourceVersion means the object hasn't changed
+			// in the API server — the informer is just re-delivering the cached object).
+			// This ensures SyncHandler periodically re-queries the cloud API for current
+			// capacity, keeping the egress-ipconfig annotation up to date as IPs are
+			// assigned or released.
+			if oldNode.ResourceVersion == newNode.ResourceVersion {
+				controller.Enqueue(newN)
+				return
+			}
 			// Enqueue when an update to the node's taints occurred - for external cloud providers, we must
 			// catch changes to taint node.cloudprovider.kubernetes.io/uninitialized.
 			// See https://kubernetes.io/docs/tasks/administer-cluster/running-cloud-controller/
-			oldNode, _ := oldN.(*corev1.Node)
-			newNode, _ := newN.(*corev1.Node)
 			if !reflect.DeepEqual(oldNode.Spec.Taints, newNode.Spec.Taints) {
 				controller.Enqueue(newN)
 			}
