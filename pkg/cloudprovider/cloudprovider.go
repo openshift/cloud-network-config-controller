@@ -92,7 +92,8 @@ type CloudProviderConfig struct {
 	Region        string // region, only used by AWS
 	AWSCAOverride string
 
-	AzureEnvironment string // The azure "environment", which is a set of API endpoints
+	AzureEnvironment                string // The azure "environment", which is a set of API endpoints
+	OpenStackMaxAllowedAddressPairs int
 }
 
 type CloudProvider struct {
