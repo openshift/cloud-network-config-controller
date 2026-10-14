@@ -305,6 +305,10 @@ func (a *AWS) getSubnet(networkInterface *ec2.InstanceNetworkInterface) (*net.IP
 // This way, CNCC managed IPs (regardless of their status) don't reduce capacity.
 func (a *AWS) getCapacity(instanceV4Capacity, instanceV6Capacity int, networkInterface *ec2.InstanceNetworkInterface, cpicIPs sets.Set[string]) (int, int) {
 	currentIPv4Usage, currentIPv6Usage := 0, 0
+
+	klog.Infof("DEBUG [getCapacity]: instanceV4Capacity=%d, instanceV6Capacity=%d, interfaceID=%s",
+		instanceV4Capacity, instanceV6Capacity, *networkInterface.NetworkInterfaceId)
+
 	for _, assignedIPv6 := range networkInterface.Ipv6Addresses {
 		if assignedIP := net.ParseIP(*assignedIPv6.Ipv6Address); assignedIP != nil {
 			if !cpicIPs.Has(assignedIP.String()) {
@@ -320,6 +324,12 @@ func (a *AWS) getCapacity(instanceV4Capacity, instanceV6Capacity int, networkInt
 			}
 		}
 	}
+
+	availV4 := instanceV4Capacity - currentIPv4Usage
+	availV6 := instanceV6Capacity - currentIPv6Usage
+
+	klog.Infof("DEBUG [getCapacity]: instanceV4Capacity=%d, instanceV6Capacity=%d, currentIPv4Usage=%d, currentIPv6Usage=%d, availableV4=%d, availableV6=%d",
+		instanceV4Capacity, instanceV6Capacity, currentIPv4Usage, currentIPv6Usage, availV4, availV6)
 
 	return instanceV4Capacity - currentIPv4Usage, instanceV6Capacity - currentIPv6Usage
 }
