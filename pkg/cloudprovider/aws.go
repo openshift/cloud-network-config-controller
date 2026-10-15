@@ -214,6 +214,9 @@ func (a *AWS) GetNodeEgressIPConfiguration(node *corev1.Node, cpicIPs sets.Set[s
 	}
 
 	capV4, capV6 := a.getCapacity(instanceV4Capacity, instanceV6Capacity, networkInterface, cpicIPs)
+	// Print instance name & ID for debugging purposes
+	klog.Infof("DEBUG [GetNodeEgressIPConfiguration]: instanceID=%s, instanceName=%s, interfaceID=%s, capV4=%d, capV6=%d",
+		awsapi.StringValue(instance.InstanceId), awsapi.StringValue(instance.Tags[0].Value), *networkInterface.NetworkInterfaceId, capV4, capV6)
 	config.Capacity = capacity{
 		IPv4: ptr.To(capV4),
 		IPv6: ptr.To(capV6),
